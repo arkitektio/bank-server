@@ -1,0 +1,50 @@
+services:
+   db:
+      image: ${DATEN_IMAGE:-jhnnsrs/daten:next}
+      # Throwaway test DB: trade durability for speed
+      command: postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+      environment:
+         POSTGRES_MULTIPLE_DATABASES: testdb
+         POSTGRES_PASSWORD: test
+         POSTGRES_USER: test
+      # No host port: docker picks a free one and `backend_stack` asks the running stack
+      # which, so parallel suites under mounts/ never collide on a pinned port.
+      ports:
+        - 5432
+   fakebank:
+      # A stand-in for api.enablebanking.com: real HTTP, real RS256 JWT verification,
+      # scenarios seeded per test through its /_admin endpoints. Built locally (compose
+      # builds it on first `up`), never pulled.
+      build: ./fakebank
+      ports:
+        - 8000
+   fakescalable:
+      # A stand-in for secure.scalable.capital + the CLI GraphQL API: real DPoP verification,
+      # device login, rotating refresh tokens with reuse detection. Built locally, never pulled.
+      build: ./fakescalable
+      ports:
+        - 8000
+   rustfs:
+      # S3 for the datalayer (uploaded statement exports). Real RustFS, as the deployment runs:
+      # upload grants are real STS AssumeRole sessions scoped to one key. The bucket is created by
+      # `conftest.datalayer`.
+      image: rustfs/rustfs:latest
+      environment:
+         RUSTFS_ACCESS_KEY: banktestroot
+         RUSTFS_SECRET_KEY: banktestrootsecret
+         RUSTFS_VOLUMES: /data
+         RUSTFS_ADDRESS: ":9000"
+      ports:
+        - 9000
+   fakegeo:
+      # A stand-in for Nominatim (OpenStreetMap geocoding) for merchant locations: places are
+      # registered per test through /_admin/places. Built locally, never pulled.
+      build: ./fakegeo
+      ports:
+        - 8000
+   fakemarket:
+      # A stand-in for the public market-data APIs (OpenFIGI, Yahoo chart, Twelve Data); series
+      # are seeded per test through /_admin. Built locally, never pulled.
+      build: ./fakemarket
+      ports:
+        - 8000

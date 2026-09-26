@@ -1,0 +1,55 @@
+django:
+  admin:
+    email: admin@admin.com
+    password: admin
+    username: admin
+  debug: false
+  hosts:
+  - "*"
+  secret_key: t!7qh%)_#&k_6px&n(xm4bes@t3nrmgh=h2k#8f@rbgz=&y9f21
+redis:
+  host: redis
+  port: 6379
+authentikate:
+  # authentikate 4.0 requires AUDIENCE. "*" (ANY_AUDIENCE) accepts a token minted
+  # for any service; the `aud` claim itself is still required. Replace with this
+  # service's identifier to check which service the token was minted for.
+  audience: "*"
+  issuers:
+  - kind: rsa
+    iss: lok
+    kid: lok-key-1
+    public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDGFj0zB7j6KrTRFEP+a2Z7toLEwJ0ROF3qSkq6vo2aK5TGRv+D3V/6VhvM2NgtUIO1iqwvf4XETamhHt2xlVzJyoyMAnAGkwkMyQJpI6wG5g7NtrRc1kkeefWbLBVW+aEI++3ec3eD9PUhnjXbQXJwju8l2ldKg2skw2fZWrjfWo0S0CuvB05nXJ8BmmAo65BBv29gGVywzZEApv/Zu16l6ftCZSEKi/zMbK6YxCekl/h3sfK7uGj6uaab7XSqqANHDZDTSotD5ws8UdMb3IP4/qoJiJm0Lsw5XpmFTt9M+ekiv/9HsWjXtzOd0BpqxynlvF1fWDr0HVnrUCh1XMzn
+  static_tokens: {}
+postgres:
+  db_name: bank
+  engine: django.db.backends.postgresql
+  host: db
+  password: postgres
+  port: 5432
+  username: fostgres
+# Enable Banking: the application id and the path of its mounted key (never commit it).
+# Without this block linking and syncing banks answer NOT_CONFIGURED.
+# enablebanking:
+#   app_id: <your Enable Banking application id>
+#   private_key_path: /secrets/enablebanking.pem
+#   redirect_urls:
+#   - https://johannesroos.de/callback
+# embeddings:            # all optional (see CONFIG.md)
+#   enabled: true
+# categorization:
+#   auto_assign: true
+#   auto_assign_threshold: 0.75
+# scalable:
+#   secret_key_path: /secrets/scalable.fernet   # Fernet.generate_key(); encrypts stored Scalable tokens
+# datalayer:             # S3 for uploaded statement exports (createFinanzguruImport); see CONFIG.md
+#   role_arn: arn:aws:iam::000000000000:role/datalayer
+#   access_key: <rustfs user>
+#   secret_key: <rustfs secret>
+#   host: rustfs
+#   port: 9000
+#   protocol: http
+#   bigfile:
+#     bucket: bank-imports
+# imports:
+#   match_window_days: 3

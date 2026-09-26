@@ -1,0 +1,149 @@
+[project]
+name = "bank-server"
+# Placeholder only — the git tag is authoritative. Releases are tag-only,
+# so semantic-release does not update this field. See [tool.semantic_release].
+version = "0.1.0"
+description = ""
+authors = [{ name = "jhnnsrs", email = "jhnnsrs@gmail.com" }]
+requires-python = ">=3.12,<4"
+readme = "README.md"
+dependencies = [
+    "django>=6",
+    "pydantic-settings[yaml]>=2.2",
+    "psycopg[binary]>=3.2",
+    "daphne>=4.0.0,<5",
+    "channels-redis>=4.1.0,<5",
+    "django-choices-field>=3",
+    "authentikate>=4.2.0",
+    "kante>=2.1.1",
+    "koherent>=4.0",
+    "ujson>=5.8.0,<6",
+    "aioredis>=2.0.1,<3",
+    "jsonpatch~=1.33",
+    "django-probes>=1.7.0,<2",
+    "rich>=14.0.0",
+    "django-redis>=5.4.0",
+    "django-health-check>=3.20.0",
+    "whitenoise>=6.6",
+    "aiohttp>=3.9",
+    "pyjwt[crypto]>=2.8",
+    "pgvector>=0.5",
+    "model2vec>=0.9",
+    "boto3>=1.38.9",
+    "django-polymorphic>=4.1.0",
+    "openpyxl>=3.1",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.39.8",
+    "pytest-cov>=7.1.0",
+    "python-semantic-release>=9.21.0",
+    "django-stubs>=5.2.0",
+    "mypy>=1.15.0",
+    "pytest-asyncio>=1.1.0",
+    "pytest-django>=4.11.1",
+    "dokker>=2.8",
+    "psycopg[binary]>=3.2",
+]
+
+[tool.django-stubs]
+django_settings_module = "bank_server.settings"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "bank_server.settings_test"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+
+[tool.ruff]
+# Enable the pycodestyle (`E`) and Pyflakes (`F`) rules by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+extend-select = ["ANN", "D1"]
+extend-ignore = [ "ANN002", "ANN003", "D100", "ANN401"]
+
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    "tests",
+    "examples",
+    "**/migrations",
+]
+
+# Same as Black.
+line-length = 300
+
+
+# Assume Python 3.12.
+target-version = "py312"
+
+
+[tool.semantic_release]
+# This server is deployed as Docker images, not a PyPI package — so a release
+# just tags the commit and cuts a GitHub Release. No wheel is built and nothing
+# is uploaded to PyPI.
+#
+# Releases are tag-only: the workflow passes `commit: false` / `changelog: false`,
+# so semantic-release never writes back to the branch. That is what keeps `main`
+# and `next` from diverging on the version line. Consequences, deliberate:
+#   - no `version_toml`: the git tag is the sole version source, and the
+#     `version` field under [project] above is an inert placeholder.
+#   - no `commit_message`: dead config when nothing is committed.
+#   - the docker job reads `steps.release.outputs.tag`, so images are unaffected.
+build_command = ""
+
+# main -> stable X.Y.Z releases. next -> prereleases X.Y.Z-rc.N.
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[tool.semantic_release.branches.next]
+match = "next"
+prerelease = true
+prerelease_token = "rc"
+
+# Maintenance branches (1.x, 2.x, ...) cut stable patch/minor releases for an
+# older major after a new major has shipped from main.
+[tool.semantic_release.branches.maintenance]
+match = '^\d+\.x$'
+prerelease = false
+
+# Keep the changelog / release notes focused on user-facing changes. These
+# patterns only filter what's rendered — they do not affect version bumps.
+[tool.semantic_release.changelog]
+exclude_commit_patterns = [
+    '^chore(?:\([^)]*\))?: ', # includes the chore(release): … bump commit
+    '^ci(?:\([^)]*\))?: ',
+    '^build(?:\([^)]*\))?: ',
+    '^style(?:\([^)]*\))?: ',
+    '^test(?:\([^)]*\))?: ',
+    '^Merge ',
+]
+
+
+
+[tool.mypy]
+exclude = ["venv/", "tests/", "examples/"]
+plugins = ["mypy_django_plugin.main","pydantic.mypy"]
+ignore_missing_imports = true
+strict = true

@@ -1,0 +1,27 @@
+version: '3.7'
+
+
+services:
+  db:
+    environment:
+      POSTGRES_MULTIPLE_DATABASES: bank
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: fostgres
+    image: jhnnsrs/daten:next
+    labels:
+      - "arkitekt.default.service=db"
+  bank:
+    build: .
+    ports:
+    - 8888:80
+    labels:
+      - "arkitekt.default.service=bank"
+      - "traefik.enable=true"
+      - "traefik.http.routers.bank.entrypoints=banksecure"
+      - "traefik.http.routers.bank.rule=Host(`jhnnsrs-server.hyena-sole.ts.net`)"
+      - "traefik.http.services.bank.loadbalancer.server.port=80"
+      - "traefik.http.routers.bank.tls.certresolver=myresolver"
+  redis:
+    image: redis:latest
+    labels:
+      - "arkitekt.default.service=redis"

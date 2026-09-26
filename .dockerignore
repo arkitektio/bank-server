@@ -1,0 +1,7 @@
+.venv
+.git
+**/__pycache__
+.pytest_cache
+# Enable Banking keys are mounted at runtime, never baked into the image
+*.pem
+.eb_session.json
