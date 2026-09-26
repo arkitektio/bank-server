@@ -1,5 +1,11 @@
 # Bank-Server
 
+> [!WARNING]
+> **Experimental, for personal use.** Bank is one of the most experimental Arkitekt services,
+> and much of it was written quickly with an AI assistant ("vibecoded"). It works for its author's
+> own setup, but it has not been reviewed or hardened the way the core services have. Expect
+> breaking changes, and think twice before trusting it with data or credentials that matter.
+
 A backend for financial planning and stats, following the design principles of the
 [Arkitekt](https://arkitekt.live) framework. It links bank accounts through the
 [Enable Banking](https://enablebanking.com) PSD2 API, keeps their transactions and balances
