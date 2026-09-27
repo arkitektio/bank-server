@@ -194,14 +194,25 @@ scheduled `sync_all_accounts` (needs `rekuest_hook`). This service itself never 
 
 This service as a HookAgent of the hub's rekuest (vendored `rekuest_service` package, mounted at
 `_rekuest/hook`; keep that path off the public edge). rekuest must list it under
-`rekuest.service_agents` with the same secret.
+`rekuest.service_agents`.
 
 | Key | Env var | Type | Default | Description |
 |---|---|---|---|---|
-| `secret` | `REKUEST_HOOK__SECRET` | str | — | HMAC secret shared with rekuest. Secret — must be set. |
 | `rekuest_url` | `REKUEST_HOOK__REKUEST_URL` | str | `http://rekuest:80/rekuest` | rekuest on the internal network; runs are reported to its intake. |
 | `service` | `REKUEST_HOOK__SERVICE` | str | `bank` | The name rekuest knows this service by (`rekuest.service_agents[].service`); signals are sent as it. |
-| `max_skew` | `REKUEST_HOOK__MAX_SKEW` | int | `300` | How old (seconds) a signed request from rekuest may be. |
+| `max_skew` | `REKUEST_HOOK__MAX_SKEW` | int | `30` | Clock skew (seconds) tolerated on a signed request; tokens live 60 s. |
+
+### `instance` — this instance's key and the hub trust bundle
+
+No shared secrets: requests between this service and rekuest carry short-lived JWTs signed with
+each side's instance key, checked against the hub's trust bundle (the coord-vouched public keys
+of every instance). Konstruktor mints the key and enrolls its public half with the coord.
+
+| Key | Env var | Type | Default | Description |
+|---|---|---|---|---|
+| `private_key` | `INSTANCE__PRIVATE_KEY` | str | — | Ed25519 private key (PKCS#8 PEM). Secret — must be set. |
+| `trust.jwks_uri` | `INSTANCE__TRUST__JWKS_URI` | str? | `null` | The coord's hub-keys URL (fakts `self.hub_keys_url`). |
+| `trust.jwks` | — | object? | `null` | Or the bundle inline, for a hub not enrolled yet. |
 
 ### `scalable` — Scalable Capital (official CLI login)
 

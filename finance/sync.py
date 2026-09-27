@@ -488,3 +488,23 @@ def after_sync(result: SyncResult) -> None:
     detect_recurring(result.account_id)
     organization_id = models.BankAccount.objects.filter(id=result.account_id).values_list("organization_id", flat=True).get()
     broadcast_sync(organization_id, result)
+    _signal_sync(result)
+
+
+def _signal_sync(result: SyncResult) -> None:
+    """Tell the hub's rekuest the account was synced: transactions are bulk-created (no model
+    signal fires for them), so this one UPDATED carries how many there were."""
+    from bank_server.service import account_signal
+
+    account = models.BankAccount.objects.select_related("organization").get(id=result.account_id)
+    account_signal.emit(
+        account.pk,
+        organization=account.organization.slug,
+        kind="UPDATED",
+        descriptors={
+            "@bank/kind": str(account.kind),
+            "@bank/currency": account.currency or "",
+            "@bank/new_transactions": result.created,
+            "@bank/updated_transactions": result.updated,
+        },
+    )

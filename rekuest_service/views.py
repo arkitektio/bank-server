@@ -21,6 +21,7 @@ import threading
 import traceback
 import uuid
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from django.conf import settings
@@ -29,7 +30,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.urls import path
 from django.views.decorators.csrf import csrf_exempt
 
-from rekuest_service import signing
+from rekuest_service import trust
 from rekuest_service.service import Action, Service, default_service
 
 logger = logging.getLogger(__name__)
@@ -37,11 +38,25 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = 10.0
 
 
-def _verified(request: HttpRequest, config: dict[str, Any]) -> str | None:
-    """The agent id the request was signed for, or None if the signature does not hold."""
-    agent_id = request.headers.get(signing.AGENT_HEADER, "")
-    ok = signing.verify(config["SECRET"], agent_id, request.body, request.headers.get(signing.SIGNATURE_V1_HEADER), int(config.get("MAX_SKEW", 300)))
-    return agent_id if ok else None
+#: The HookAgent a delivery is for — where the service reports back (``agi/http/<agent>``).
+#: Routing, not security: the service JWT is what proves rekuest sent the request.
+AGENT_HEADER = "X-Rekuest-Agent"
+
+
+def _verified(service: Service, request: HttpRequest, config: dict[str, Any]) -> str | None:
+    """The agent id of a request rekuest really sent to THIS service, or None."""
+    audience = service.signing_identifier()
+    if not audience:
+        return None
+    try:
+        verified = trust.verify(request.method or "", request.path, request.body, request.headers.get("Authorization"), audience=audience, max_skew=int(config.get("MAX_SKEW", 30)))
+    except trust.TrustError as error:
+        logger.info("Refused a request to %s: %s", request.path, error)
+        return None
+    if verified.issuer != service.rekuest_identifier():
+        logger.info("Refused a request to %s from %s: only rekuest may call it", request.path, verified.issuer)
+        return None
+    return request.headers.get(AGENT_HEADER, "")
 
 
 def manifest(service: Service, request: HttpRequest) -> HttpResponse:
@@ -51,7 +66,7 @@ def manifest(service: Service, request: HttpRequest) -> HttpResponse:
         return JsonResponse({"error": "rekuest_hook is not configured"}, status=503)
     if request.method != "GET":
         return HttpResponse(status=405)
-    if _verified(request, config) is None:
+    if _verified(service, request, config) is None:
         return JsonResponse({"error": "Invalid signature"}, status=401)
     return JsonResponse(service.manifest())
 
@@ -63,8 +78,8 @@ def hook(service: Service, request: HttpRequest) -> HttpResponse:
         return JsonResponse({"error": "rekuest_hook is not configured"}, status=503)
     if request.method != "POST":
         return HttpResponse(status=405)
-    agent_id = _verified(request, config)
-    if agent_id is None:
+    agent_id = _verified(service, request, config)
+    if not agent_id:
         return JsonResponse({"error": "Invalid signature"}, status=401)
     try:
         message = json.loads(request.body)
@@ -79,29 +94,29 @@ def hook(service: Service, request: HttpRequest) -> HttpResponse:
     task = str(message.get("task", ""))
     target = service.actions.get(message.get("interface", ""))
     if target is None:
-        _report(config, agent_id, {"type": "CRITICAL", "task": task, "error": f"No action {message.get('interface')!r} on this service"})
+        _report(service, config, agent_id, {"type": "CRITICAL", "task": task, "error": f"No action {message.get('interface')!r} on this service"})
         return JsonResponse({"error": "Unknown interface"}, status=404)
 
     # A thread, not an event-loop task: it outlives the request under any server (WSGI
     # runserver tears its loop down with the response), and the function may block.
-    threading.Thread(target=_run, args=(config, agent_id, task, target, message.get("args") or {}), name=f"rekuest-hook-{task}", daemon=True).start()
+    threading.Thread(target=_run, args=(service, config, agent_id, task, target, message.get("args") or {}), name=f"rekuest-hook-{task}", daemon=True).start()
     return JsonResponse({"accepted": task}, status=202)
 
 
-def _run(config: dict[str, Any], agent_id: str, task: str, target: Action, args: dict[str, Any]) -> None:
+def _run(service: Service, config: dict[str, Any], agent_id: str, task: str, target: Action, args: dict[str, Any]) -> None:
     """Run one Assign and report it. Started first: that is what tells rekuest it was picked up."""
     try:
-        _report(config, agent_id, {"type": "STARTED", "task": task})
+        _report(service, config, agent_id, {"type": "STARTED", "task": task})
         result = target.function(**args)
         if inspect.isawaitable(result):
             result = asyncio.run(_await(result))
         returns = result if isinstance(result, dict) else ({} if result is None else {"result": result})
-        _report(config, agent_id, {"type": "YIELD", "task": task, "returns": returns})
-        _report(config, agent_id, {"type": "COMPLETED", "task": task})
+        _report(service, config, agent_id, {"type": "YIELD", "task": task, "returns": returns})
+        _report(service, config, agent_id, {"type": "COMPLETED", "task": task})
     except Exception as error:
         logger.warning("rekuest action %s (task %s) failed: %s", target.interface, task, error)
         logger.debug("rekuest action %s failed", target.interface, exc_info=True)
-        _report(config, agent_id, {"type": "CRITICAL", "task": task, "error": f"{type(error).__name__}: {error}\n{traceback.format_exc(limit=5)}"})
+        _report(service, config, agent_id, {"type": "CRITICAL", "task": task, "error": f"{type(error).__name__}: {error}\n{traceback.format_exc(limit=5)}"})
     finally:
         close_old_connections()
 
@@ -110,11 +125,16 @@ async def _await(awaitable):
     return await awaitable
 
 
-def _report(config: dict[str, Any], agent_id: str, message: dict[str, Any]) -> bool:
+def _report(service: Service, config: dict[str, Any], agent_id: str, message: dict[str, Any]) -> bool:
     """POST one signed event to rekuest's intake. Never raises: a lost report is rekuest's to time out."""
-    body = json.dumps({"id": str(uuid.uuid4()), **message}).encode("utf-8")
+    body = json.dumps({"id": str(uuid.uuid4()), **message}).encode()
     url = f"{config['REKUEST_URL'].rstrip('/')}/agi/http/{agent_id}"
-    headers = {"Content-Type": "application/json", signing.SIGNATURE_V1_HEADER: signing.sign(config["SECRET"], agent_id, body)}
+    try:
+        authorization = trust.sign("POST", urlparse(url).path, body, issuer=service.signing_identifier() or "", audience=service.rekuest_identifier(), key=service.signing_key())
+    except trust.TrustError as error:
+        logger.warning("Could not sign a report for task %s: %s", message.get("task"), error)
+        return False
+    headers = {"Content-Type": "application/json", "Authorization": authorization}
     try:
         response = httpx.post(url, content=body, headers=headers, timeout=_TIMEOUT)
         response.raise_for_status()

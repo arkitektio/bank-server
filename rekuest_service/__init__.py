@@ -25,19 +25,26 @@ thread, and reports its return value (or the error) back to rekuest's intake. ``
 declared signal announces an object — with the provenance token of the task it was created in —
 and rekuest runs whatever triggers attach to it. The service keeps no queue and no timer.
 
-Settings (``settings.REKUEST_HOOK``, from the service's ``rekuest_service`` config block)::
+Trust (:mod:`rekuest_service.trust`): no shared secrets. Every instance holds its own Ed25519
+key; the hub's coord (lok) vouches for the public halves in a trust bundle. Each request between
+rekuest and the service carries a short-lived JWT signed by the sender, bound to the receiver,
+the method, the path and the body.
 
-    SECRET       the HMAC secret shared with rekuest (its ``service_agents[].secret``)
-    REKUEST_URL  rekuest's base URL on the internal network, e.g. http://rekuest:80/rekuest
-    SERVICE      overrides the Service's name (what rekuest knows it by); optional
-    MAX_SKEW     how old (seconds) a signed request may be; default 300
+Settings::
+
+    settings.INSTANCE      PRIVATE_KEY (PKCS#8 PEM), and TRUST_JWKS_URI or an inline TRUST_JWKS
+    settings.REKUEST_HOOK  REKUEST_URL (rekuest on the internal network, e.g.
+                           http://rekuest:80/rekuest); optional SERVICE (name override),
+                           IDENTIFIER (signing identity override), REKUEST_IDENTIFIER
+                           (default live.arkitekt.rekuest), MAX_SKEW (seconds, default 30)
 
 The module-level ``action`` / ``declare_signal`` / ``emit`` / ``views.urlpatterns`` register on
 a process-default service; they remain for existing callers.
 """
 
+from rekuest_service import trust
 from rekuest_service.registry import action, declare_signal, declared_signals, registered
-from rekuest_service.service import Service, Signal
+from rekuest_service.service import Service, Signal, organization_of
 from rekuest_service.signals import emit
 
-__all__ = ["Service", "Signal", "action", "declare_signal", "declared_signals", "emit", "registered"]
+__all__ = ["Service", "Signal", "action", "declare_signal", "declared_signals", "emit", "organization_of", "registered", "trust"]

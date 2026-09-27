@@ -196,8 +196,15 @@ EMBEDDINGS = {
 CATEGORIZATION = conf.categorization.model_dump()
 # The hub's rekuest schedules ``sync_all_accounts`` through the vendored ``rekuest_service`` package.
 REKUEST_HOOK = (
-    {"SECRET": conf.rekuest_hook.secret, "REKUEST_URL": conf.rekuest_hook.rekuest_url, "SERVICE": conf.rekuest_hook.service, "MAX_SKEW": conf.rekuest_hook.max_skew}
+    {"REKUEST_URL": conf.rekuest_hook.rekuest_url, "SERVICE": conf.rekuest_hook.service, "MAX_SKEW": conf.rekuest_hook.max_skew}
     if conf.rekuest_hook
+    else None
+)
+# This instance's key and the hub trust bundle (``rekuest_service.trust``): requests to and from
+# rekuest are signed with instance keys the coord vouches for — no shared secrets.
+INSTANCE = (
+    {"PRIVATE_KEY": conf.instance.private_key, "TRUST_JWKS_URI": conf.instance.trust.jwks_uri, "TRUST_JWKS": conf.instance.trust.jwks}
+    if conf.instance
     else None
 )
 

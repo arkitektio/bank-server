@@ -16,26 +16,41 @@ from django.utils import timezone
 
 from finance import models
 from finance.scheduled import sync_all_accounts
-from rekuest_service import registered, signing
+from joserfc.jwk import OKPKey
+
+from bank_server.service import service
+from rekuest_service import trust
 from tests.conftest import account, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-SECRET = "bank-hook-secret"
+BANK_KEY = OKPKey.generate_key("Ed25519")
+REKUEST_KEY = OKPKey.generate_key("Ed25519")
 
 
 @pytest.fixture
 def hooked(settings):
-    settings.REKUEST_HOOK = {"SECRET": SECRET, "REKUEST_URL": "http://127.0.0.1:9", "MAX_SKEW": 300}
+    settings.REKUEST_HOOK = {"REKUEST_URL": "http://127.0.0.1:9", "SERVICE": "bank"}
+    settings.INSTANCE = {
+        "PRIVATE_KEY": BANK_KEY.as_pem(private=True).decode(),
+        "TRUST_JWKS": {
+            "keys": [
+                {**trust.public_jwk(BANK_KEY), "service": "live.arkitekt.bank"},
+                {**trust.public_jwk(REKUEST_KEY), "service": "live.arkitekt.rekuest"},
+            ]
+        },
+    }
     return settings
 
 
-def _signed(body: bytes, agent: str = "17") -> dict:
-    return {signing.AGENT_HEADER: agent, signing.SIGNATURE_V1_HEADER: signing.sign(SECRET, agent, body)}
+def _signed(body: bytes, agent: str = "17", *, method: str = "POST", path: str = "/_rekuest/hook", key=REKUEST_KEY) -> dict:
+    """Headers of a request rekuest sends: a service JWT from rekuest's key, for bank."""
+    authorization = trust.sign(method, path, body, issuer="live.arkitekt.rekuest", audience="live.arkitekt.bank", key=key)
+    return {"Authorization": authorization, "X-Rekuest-Agent": agent}
 
 
 def test_the_action_declares_its_default_schedule():
-    declared = registered()["sync_all_accounts"]
+    declared = service.actions["sync_all_accounts"]
     assert declared.default_interval == 43200
     assert declared.manifest()["default_interval"] == 43200
 
@@ -80,7 +95,7 @@ async def test_a_signed_assign_runs_the_sync(hooked, link, fakebank):
 def test_the_manifest_is_signed_and_lists_the_action(hooked):
     client = HttpClient()
     assert client.get("/_rekuest/hook/manifest").status_code == 401
-    response = client.get("/_rekuest/hook/manifest", headers=_signed(b""))
+    response = client.get("/_rekuest/hook/manifest", headers=_signed(b"", method="GET", path="/_rekuest/hook/manifest"))
     assert response.status_code == 200
     assert "sync_all_accounts" in [a["interface"] for a in response.json()["actions"]]
 
@@ -89,7 +104,7 @@ def test_unsigned_forged_and_unconfigured_requests_are_refused(hooked, settings)
     client = HttpClient()
     body = b'{"type": "ASSIGN", "task": "1", "interface": "sync_all_accounts", "args": {}}'
     assert client.post("/_rekuest/hook", data=body, content_type="application/json").status_code == 401
-    forged = {signing.AGENT_HEADER: "17", signing.SIGNATURE_V1_HEADER: signing.sign("wrong", "17", body)}
+    forged = _signed(body, key=BANK_KEY)  # bank's own key, posing as rekuest
     assert client.post("/_rekuest/hook", data=body, content_type="application/json", headers=forged).status_code == 401
 
     settings.REKUEST_HOOK = None

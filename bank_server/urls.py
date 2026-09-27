@@ -19,12 +19,12 @@ from kante.path import dynamicpath
 
 from health_check.views import MainView
 from django.views.decorators.csrf import csrf_exempt
-from rekuest_service.views import urlpatterns as rekuest_service_urls
+from bank_server.service import service as rekuest_service
 
 
 urlpatterns = [
     dynamicpath("admin/", admin.site.urls),
     dynamicpath("ht",  csrf_exempt(MainView.as_view()), name="health_check"),
     # The hub's rekuest schedules ``sync_all_accounts`` through here (internal network only).
-    *rekuest_service_urls,
+    *rekuest_service.urls,
 ]

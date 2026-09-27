@@ -21,7 +21,7 @@ from django.utils import timezone
 from finance import models
 from finance.errors import SyncBudgetExhausted
 from finance.sync import AlreadySyncing, after_sync, sync_budget, sync_syncer
-from rekuest_service import action
+from bank_server.service import service
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,8 @@ def _due_syncers() -> list[int]:
     return due
 
 
-@action(
-    "sync_all_accounts",
+@service.action(
+    interface="sync_all_accounts",
     name="Sync all bank accounts",
     description="Sync every active bank account that has sync budget to spare, unattended.",
     default_interval=settings.BANK_SYNC.get("scheduled_every_seconds"),
@@ -81,8 +81,8 @@ def _reembed_interval() -> int | None:
     return embeddings.get("SWEEP_INTERVAL") if embeddings.get("ENABLED", True) else None
 
 
-@action(
-    "reembed_stale",
+@service.action(
+    interface="reembed_stale",
     name="Re-embed stale rows",
     description="Embed transactions, categories and category terms whose vector is missing or came from another model (after a model change, or when the model was unavailable at write time).",
     default_interval=_reembed_interval(),

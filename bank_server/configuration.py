@@ -8,7 +8,7 @@ with a ``ValidationError`` if they are not supplied via config or environment.
 """
 
 import os
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ByteSize, ConfigDict, Field
 from pydantic_settings import (
@@ -253,10 +253,23 @@ class PricesSettings(BaseModel):
 class RekuestHookSettings(BaseModel):
     """This service as a HookAgent of the hub's rekuest (the vendored ``rekuest_service`` package)."""
 
-    secret: str = Field(description="The HMAC secret shared with rekuest (rekuest's `service_agents[].secret` for this service). Secret — must be set.")
     rekuest_url: str = Field(default="http://rekuest:80/rekuest", description="rekuest's base URL on the internal network; runs are reported to its `agi/http/<agent>` intake.")
     service: str = Field(default="bank", description="The name rekuest knows this service by (its `rekuest.service_agents[].service`); signals are sent as it.")
-    max_skew: int = Field(default=300, description="How old (seconds) a signed request from rekuest may be.")
+    max_skew: int = Field(default=30, description="Clock skew (seconds) tolerated on a signed request; tokens themselves live 60 s.")
+
+
+class InstanceTrustSettings(BaseModel):
+    """Where the hub's instance public keys come from: the coord's bundle, or inline."""
+
+    jwks_uri: Optional[str] = Field(default=None, description="The coord's hub-keys URL (the fakts `self.hub_keys_url`).")
+    jwks: Optional[Dict[str, Any]] = Field(default=None, description="The bundle inline (a JWKS whose keys carry `service`), for a hub not enrolled yet.")
+
+
+class InstanceSettings(BaseModel):
+    """This instance's key — its only secret towards the hub's other services — and whom it trusts."""
+
+    private_key: str = Field(description="Ed25519 private key (PKCS#8 PEM). Signs this service's requests to rekuest. Secret — must be set.")
+    trust: InstanceTrustSettings = Field(default_factory=InstanceTrustSettings, description="The hub's trust bundle.")
 
 
 class Settings(BaseSettings):
@@ -278,6 +291,7 @@ class Settings(BaseSettings):
     datalayer: Optional[DatalayerSettings] = Field(default=None, description="S3 storage for uploaded statement exports. Without it files cannot be uploaded (`import_finanzguru` still imports a local file).")
     imports: ImportSettings = Field(default_factory=ImportSettings, description="How imported statements merge with synced history.")
     rekuest_hook: Optional[RekuestHookSettings] = Field(default=None, description="Expose `sync_all_accounts` to the hub's rekuest, which schedules it. Without it nothing syncs unless a client asks.")
+    instance: Optional[InstanceSettings] = Field(default=None, description="This instance's key and the hub trust bundle (signed requests to and from rekuest, no shared secrets).")
 
     @classmethod
     def settings_customise_sources(
