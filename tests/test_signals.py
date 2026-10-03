@@ -1,4 +1,4 @@
-"""bank's model signals: what it declares to the hub's rekuest, and that a save reaches it signed.
+"""bank's structures and their signals: what it declares to the hub's rekuest, and that a save reaches it signed.
 
 The save goes to a real local HTTP server standing in for rekuest's signal intake, and is
 checked the way rekuest checks it (the instance-key JWT, the body).
@@ -106,6 +106,22 @@ def test_the_manifest_declares_every_model_signal():
     assert {s["identifier"]: s["kinds"] for s in service.manifest()["signals"]} == EXPECTED
 
 
+def test_the_manifest_lists_what_bank_hosts_with_its_descriptors():
+    hosted = {s["identifier"]: s for s in service.manifest()["structures"]}
+    assert set(hosted) == set(EXPECTED)
+    assert hosted["@bank/bankaccount"]["label"] == "Bank Account"
+    assert {"key": "@bank/interval_days", "type": "INT", "description": "The days between two payments"} in hosted["@bank/recurringpayment"]["descriptors"]
+    assert hosted["@bank/merchant"]["descriptors"] == hosted["@bank/budget"]["descriptors"] == []
+
+
+def test_what_a_sync_brought_is_said_by_the_signal_not_by_the_account():
+    manifest = service.manifest()
+    account = next(s for s in manifest["structures"] if s["identifier"] == "@bank/bankaccount")
+    signal = next(s for s in manifest["signals"] if s["identifier"] == "@bank/bankaccount")
+    assert [d["key"] for d in account["descriptors"]] == ["@bank/kind", "@bank/currency"]
+    assert signal["descriptors"] == ["@bank/kind", "@bank/currency", "@bank/new_transactions", "@bank/updated_transactions"]
+
+
 @pytest.mark.django_db(transaction=True)
 def test_a_save_is_signalled_signed_by_this_instance(intake):
     from finance.models import Category
@@ -129,7 +145,7 @@ async def test_a_sync_is_one_account_signal_with_its_counts(intake, link, fakeba
 
     fakebank.scenario([account(iban="AT1", transactions=[tx("-1.00", "2026-09-01", "Shop"), tx("-2.00", "2026-09-02", "Cafe")])])
     await link()
-    await sync_all_accounts()
+    await sync_all_accounts(organization="static_org")
 
     def synced():
         return [r for r in intake.of("@bank/bankaccount", count=1) if "@bank/new_transactions" in r["json"]["descriptors"]]
@@ -139,4 +155,7 @@ async def test_a_sync_is_one_account_signal_with_its_counts(intake, link, fakeba
         time.sleep(0.05)
     (received,) = synced()
     assert received["json"]["kind"] == "UPDATED"
-    assert received["json"]["descriptors"]["@bank/new_transactions"] == 2
+    # The account's own descriptors, and what only the sync knows.
+    carried = received["json"]["descriptors"]
+    assert set(carried) == {"@bank/kind", "@bank/currency", "@bank/new_transactions", "@bank/updated_transactions"}
+    assert (carried["@bank/kind"], carried["@bank/currency"], carried["@bank/new_transactions"]) == ("CASH", "EUR", 2)

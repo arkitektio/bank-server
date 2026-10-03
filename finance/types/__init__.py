@@ -14,9 +14,10 @@ import strawberry
 import strawberry_django
 from django.db.models import Max, Min, Sum
 from django.utils import timezone
+from strawberry.scalars import JSON
 
 from finance import enums, filters, models
-from finance.types._shared import OrgScoped
+from finance.types._shared import DESCRIPTORS_DESCRIPTION, OrgScoped, resolve_descriptors
 from finance.types.auth import Organization, User
 
 
@@ -29,6 +30,7 @@ def _model_id() -> str:
 @kante.django_type(models.BankConnection, pagination=True, filters=filters.BankConnectionFilter, description="One consent at one bank. Accounts are synced through it while it is ACTIVE.")
 class BankConnection(OrgScoped):
     id: strawberry.ID
+    descriptors: JSON = strawberry_django.field(resolver=resolve_descriptors, description=DESCRIPTORS_DESCRIPTION)
     aspsp_name: str
     aspsp_country: str
     provider: enums.Provider
@@ -115,6 +117,7 @@ def _live_syncers(account: models.BankAccount) -> list[models.AccountSyncer]:
 @kante.django_type(models.BankAccount, pagination=True, filters=filters.BankAccountFilter, ordering=filters.BankAccountOrder, description="An account. Keeps its history across relinks; fed by its syncers and by imports.")
 class BankAccount(OrgScoped):
     id: strawberry.ID
+    descriptors: JSON = strawberry_django.field(resolver=resolve_descriptors, description=DESCRIPTORS_DESCRIPTION)
     iban: Optional[str]
     name: Optional[str]
     currency: str
@@ -218,6 +221,7 @@ class HoldingSnapshot(OrgScoped):
 @kante.django_type(models.Category, pagination=True, filters=filters.CategoryFilter, ordering=filters.CategoryOrder, description="A spending or income category. Categories nest; budgets and stats roll children up.")
 class Category(OrgScoped):
     id: strawberry.ID
+    descriptors: JSON = strawberry_django.field(resolver=resolve_descriptors, description=DESCRIPTORS_DESCRIPTION)
     name: str
     color: Optional[str]
     kind: enums.CategoryKind = strawberry_django.field(description="Expense, income or transfer — always the root's kind, for the whole subtree.")
@@ -268,6 +272,7 @@ class CategoryRule(OrgScoped):
 @kante.django_type(models.Transaction, pagination=True, filters=filters.TransactionFilter, ordering=filters.TransactionOrder, description="A booked or pending transaction. Amounts are signed: negative is money out.")
 class Transaction(OrgScoped):
     id: strawberry.ID
+    descriptors: JSON = strawberry_django.field(resolver=resolve_descriptors, description=DESCRIPTORS_DESCRIPTION)
     account: BankAccount
     booking_date: Optional[datetime.date]
     value_date: Optional[datetime.date]
@@ -314,6 +319,7 @@ class Transaction(OrgScoped):
 @kante.django_type(models.Budget, pagination=True, filters=filters.BudgetFilter, ordering=filters.BudgetOrder, description="A monthly spending limit for a category and its children, in one currency.")
 class Budget(OrgScoped):
     id: strawberry.ID
+    descriptors: JSON = strawberry_django.field(resolver=resolve_descriptors, description=DESCRIPTORS_DESCRIPTION)
     category: Category
     amount: Decimal
     currency: str
@@ -325,6 +331,7 @@ class Budget(OrgScoped):
 @kante.django_type(models.RecurringPayment, pagination=True, filters=filters.RecurringPaymentFilter, ordering=filters.RecurringPaymentOrder, description="A payment that repeats at a regular interval, detected from an account's history.")
 class RecurringPayment(OrgScoped):
     id: strawberry.ID
+    descriptors: JSON = strawberry_django.field(resolver=resolve_descriptors, description=DESCRIPTORS_DESCRIPTION)
     account: BankAccount
     label: str
     amount: Decimal
@@ -505,6 +512,7 @@ class MerchantLocation(OrgScoped):
 @kante.django_type(models.Merchant, pagination=True, filters=filters.MerchantFilter, ordering=filters.MerchantOrder, description="Someone the organization pays or is paid by. Recognized on bank lines by its aliases; its default category categorizes its transactions (after rules, before suggestions).")
 class Merchant(OrgScoped):
     id: strawberry.ID
+    descriptors: JSON = strawberry_django.field(resolver=resolve_descriptors, description=DESCRIPTORS_DESCRIPTION)
     name: str
     key: str
     description: str

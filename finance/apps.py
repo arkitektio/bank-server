@@ -9,5 +9,5 @@ class FinanceConfig(AppConfig):
 
     def ready(self) -> None:
         import embeddings.checks  # noqa: F401  registers the model/width system checks
-        from finance import scheduled  # noqa: F401  registers the rekuest actions (and, through
-        # bank_server.service, the model signals) in every process
+        from finance import scheduled  # noqa: F401  registers the HookAgent's actions (and, through
+        # bank_server.service, the structures and their signals) in every process

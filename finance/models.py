@@ -384,6 +384,7 @@ class CategoryTerm(EmbeddedDescriptionMixin, models.Model):
     text = models.CharField(max_length=300, help_text="The phrase, as written in the name or description.")
 
     embedding_source_fields = ("text",)
+    embedding_organization_path = "category__organization"
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["category", "text"], name="bank_term_cat_text")]
@@ -529,6 +530,7 @@ class Transaction(EmbeddedDescriptionMixin, models.Model):
     updated_at = models.DateTimeField(auto_now=True, help_text="When the row last changed.")
 
     embedding_source_fields = ("counterparty", "remittance", "kind", "merchant_context")
+    embedding_organization_path = "account__organization"
 
     def embedding_source_text(self) -> str | None:
         """The bank line (normalized) plus its merchant context (see :mod:`finance.textnorm`)."""

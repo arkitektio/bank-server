@@ -1,9 +1,12 @@
-"""The sync the hub's rekuest schedules: every active syncer, unattended, within its budget.
+"""The actions of bank's HookAgent: what the hub's rekuest schedules here, per organization.
 
-Registered as the rekuest action ``sync_all_accounts`` (vendored ``rekuest_service``); rekuest's
-manifest read gives it ``sync.scheduled_every_seconds`` as its default schedule. Nothing here
-loops or waits — each run is one pass, started by rekuest, and a run lost to a crash is simply
-followed by the next one.
+``sync_all_accounts`` syncs an organization's active syncers, unattended, within their budget;
+``reembed_stale`` re-embeds its stale rows. Both are registered on the agent declared in
+``bank_server.service`` (vendored ``rekuest_service``); rekuest's manifest read gives the sync
+``sync.scheduled_every_seconds`` as its default schedule. Every organization has the agent and
+its own schedules, so a run is handed its organization's slug and does that organization's
+share of the work, nothing else. Nothing here loops or waits — each run is one pass, started by
+rekuest, and a run lost to a crash is simply followed by the next one.
 
 A scheduled sync is an ordinary :func:`finance.sync.sync_syncer` without the user's PSU
 headers: it takes the same lease (so it never collides with a user's sync on any replica) and
@@ -21,17 +24,17 @@ from django.utils import timezone
 from finance import models
 from finance.errors import SyncBudgetExhausted
 from finance.sync import AlreadySyncing, after_sync, sync_budget, sync_syncer
-from bank_server.service import service
+from bank_server.service import agent
 
 logger = logging.getLogger(__name__)
 
 
-def _due_syncers() -> list[int]:
-    """Syncers with an active, unexpired connection whose budget allows a scheduled sync right now."""
+def _due_syncers(organization: str) -> list[int]:
+    """The organization's syncers with an active, unexpired connection whose budget allows a scheduled sync right now."""
     now = timezone.now()
     reserve = settings.BANK_SYNC.get("scheduled_reserve", 1)
     candidates = (
-        models.AccountSyncer.objects.filter(connection__status=models.ConnectionStatus.ACTIVE)
+        models.AccountSyncer.objects.filter(organization__slug=organization, connection__status=models.ConnectionStatus.ACTIVE)
         .filter(Q(connection__valid_until__isnull=True) | Q(connection__valid_until__gt=now))
         .order_by("id")
     )
@@ -46,15 +49,15 @@ def _due_syncers() -> list[int]:
     return due
 
 
-@service.action(
+@agent.action(
     interface="sync_all_accounts",
     name="Sync all bank accounts",
-    description="Sync every active bank account that has sync budget to spare, unattended.",
+    description="Sync every active bank account of the organization that has sync budget to spare, unattended.",
     default_interval=settings.BANK_SYNC.get("scheduled_every_seconds"),
 )
-async def sync_all_accounts() -> dict:
+async def sync_all_accounts(organization: str) -> dict:
     synced = skipped = failed = 0
-    for syncer_id in await sync_to_async(_due_syncers)():
+    for syncer_id in await sync_to_async(_due_syncers)(organization):
         try:
             result = await sync_syncer(syncer_id)
             await sync_to_async(after_sync)(result)
@@ -67,13 +70,13 @@ async def sync_all_accounts() -> dict:
     return {"synced": synced, "skipped": skipped, "failed": failed}
 
 
-def _reembed() -> int:
+def _reembed(organization: str) -> int:
     from embeddings import engine
     from embeddings.healer import reembed_all
 
     if not engine.enabled():
         return 0
-    return reembed_all([models.Transaction, models.Category, models.CategoryTerm], max_batches=50)
+    return reembed_all([models.Transaction, models.Category, models.CategoryTerm], max_batches=50, organization=organization)
 
 
 def _reembed_interval() -> int | None:
@@ -81,11 +84,11 @@ def _reembed_interval() -> int | None:
     return embeddings.get("SWEEP_INTERVAL") if embeddings.get("ENABLED", True) else None
 
 
-@service.action(
+@agent.action(
     interface="reembed_stale",
     name="Re-embed stale rows",
-    description="Embed transactions, categories and category terms whose vector is missing or came from another model (after a model change, or when the model was unavailable at write time).",
+    description="Embed the organization's transactions, categories and category terms whose vector is missing or came from another model (after a model change, or when the model was unavailable at write time).",
     default_interval=_reembed_interval(),
 )
-async def reembed_stale() -> dict:
-    return {"reembedded": await sync_to_async(_reembed)()}
+async def reembed_stale(organization: str) -> dict:
+    return {"reembedded": await sync_to_async(_reembed)(organization)}
