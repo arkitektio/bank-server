@@ -18,7 +18,8 @@ from finance import models
 from finance.scheduled import sync_all_accounts
 from joserfc.jwk import OKPKey
 
-from bank_server.service import agent, service
+from bank_server.hook_agent import agent
+from bank_server.service import service
 from rekuest_service import trust
 from tests.conftest import account, tx
 
@@ -30,7 +31,7 @@ REKUEST_KEY = OKPKey.generate_key("Ed25519")
 
 @pytest.fixture
 def hooked(settings):
-    settings.REKUEST_HOOK = {"REKUEST_URL": "http://127.0.0.1:9", "SERVICE": "bank"}
+    settings.REKUEST_HOOK = {"REKUEST_URL": "http://127.0.0.1:9"}
     settings.INSTANCE = {
         "PRIVATE_KEY": BANK_KEY.as_pem(private=True).decode(),
         "TRUST_JWKS": {
@@ -49,16 +50,17 @@ def _signed(body: bytes, agent: str = "17", *, method: str = "POST", path: str =
     return {"Authorization": authorization, "X-Rekuest-Agent": agent}
 
 
-def test_the_action_declares_its_default_schedule():
-    declared = agent.actions["sync_all_accounts"]
-    assert declared.default_interval == 43200
-    assert declared.manifest()["default_interval"] == 43200
+def test_the_action_is_offered_and_wired_to_nothing():
+    assert agent.actions["sync_all_accounts"].manifest() == {
+        "interface": "sync_all_accounts",
+        "name": "Sync all bank accounts",
+        "description": "Sync every active bank account of the organization that has sync budget to spare, unattended.",
+    }
 
 
-def test_the_service_itself_offers_no_actions():
-    assert not hasattr(service, "action")
-    assert service.manifest()["actions"] == agent.manifest()
-    assert [a["interface"] for a in agent.manifest()] == ["sync_all_accounts", "reembed_stale"]
+def test_the_service_and_the_agent_are_separate_declarations():
+    assert "actions" not in service.manifest() and not hasattr(service, "action")
+    assert [a["interface"] for a in agent.manifest()["actions"]] == ["sync_all_accounts", "reembed_stale"]
 
 
 async def test_a_scheduled_pass_syncs_every_active_account(link, fakebank):

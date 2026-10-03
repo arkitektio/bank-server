@@ -494,10 +494,10 @@ def after_sync(result: SyncResult) -> None:
 def _signal_sync(result: SyncResult) -> None:
     """Tell the hub's rekuest the account was synced: transactions are bulk-created (no model
     signal fires for them), so this one UPDATED carries how many there were."""
-    from bank_server.service import NEW_TRANSACTIONS, UPDATED_TRANSACTIONS, bank_account
+    from bank_server.service import NEW_TRANSACTIONS, UPDATED_TRANSACTIONS, bank_account, bank_account_signal
 
     account = models.BankAccount.objects.select_related("organization").get(id=result.account_id)
-    bank_account.signal.emit(
+    bank_account_signal.emit(
         account.pk,
         organization=account.organization.slug,
         kind="UPDATED",

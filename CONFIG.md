@@ -187,19 +187,22 @@ scheduled `sync_all_accounts` (needs `rekuest_hook`). This service itself never 
 |---|---|---|---|---|
 | `lease_seconds` | `SYNC__LEASE_SECONDS` | int | `600` | How long a sync holds an account; a crashed sync frees it after this. |
 | `overlap_days` | `SYNC__OVERLAP_DAYS` | int | `7` | An incremental sync re-fetches this many days before the newest booked transaction. |
-| `scheduled_every_seconds` | `SYNC__SCHEDULED_EVERY_SECONDS` | int? | `43200` | The default schedule rekuest gives `sync_all_accounts` (12 h = 2 of a PSD2 bank's ~4 daily syncs). Null: no default; it runs only when scheduled or triggered in rekuest. |
+| `scheduled_every_seconds` | `SYNC__SCHEDULED_EVERY_SECONDS` | int? | `43200` | No longer used: the action is only offered, and scheduling it is the organization's own automation in rekuest. Kept so existing configs load. |
 | `scheduled_reserve` | `SYNC__SCHEDULED_RESERVE` | int | `1` | A scheduled sync skips an account with this many syncs (or fewer) left today, so a user can still sync by hand. |
 
-### `rekuest_hook` — scheduled by the hub's rekuest (optional)
+### `rekuest_hook` — how this process reaches the hub's rekuest (optional)
 
-This service as a HookAgent of the hub's rekuest (vendored `rekuest_service` package, mounted at
-`_rekuest/hook`; keep that path off the public edge). rekuest must list it under
-`rekuest.service_agents`.
+Two separate things use it. The **service** (vendored `rekuest_service`, mounted at
+`_rekuest/service`) says what exists here: rekuest lists it under `rekuest.services` and
+catalogues its structures and signals. The **hook agent** (vendored `rekuest_hook`, mounted at
+`_rekuest/hook`) offers this process's actions: rekuest lists it under `rekuest.hook_agents` and
+gives every organization the agent. Nothing is scheduled by itself; when an action runs is the
+organization's own automation. Keep `_rekuest/` off the public edge.
 
 | Key | Env var | Type | Default | Description |
 |---|---|---|---|---|
 | `rekuest_url` | `REKUEST_HOOK__REKUEST_URL` | str | `http://rekuest:80/rekuest` | rekuest on the internal network; runs are reported to its intake. |
-| `service` | `REKUEST_HOOK__SERVICE` | str | `bank` | The name rekuest knows this service by (`rekuest.service_agents[].service`); signals are sent as it. |
+| `service` | `REKUEST_HOOK__SERVICE` | str | `bank` | The name rekuest knows this process by: its `rekuest.services[].name` (signals are sent as it) and its `rekuest.hook_agents[].name`. |
 | `max_skew` | `REKUEST_HOOK__MAX_SKEW` | int | `30` | Clock skew (seconds) tolerated on a signed request; tokens live 60 s. |
 
 ### `instance` — this instance's key and the hub trust bundle

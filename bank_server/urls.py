@@ -20,12 +20,15 @@ from kante.path import dynamicpath
 from health_check.views import MainView
 from django.views.decorators.csrf import csrf_exempt
 from rekuest_service.views import answers_challenge
+from bank_server.hook_agent import agent as hook_agent
 from bank_server.service import service as rekuest_service
 
 
 urlpatterns = [
     dynamicpath("admin/", admin.site.urls),
     dynamicpath("ht",  answers_challenge(csrf_exempt(MainView.as_view())), name="health_check"),
-    # The hub's rekuest schedules ``sync_all_accounts`` through here (internal network only).
+    # What this service hosts and emits, read by the hub's rekuest (internal network only).
     *rekuest_service.urls,
+    # This process's hook agent: the hub's rekuest POSTs it Assigns (internal network only). Not the service's.
+    *hook_agent.urls,
 ]

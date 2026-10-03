@@ -12,7 +12,8 @@ import pytest
 from asgiref.sync import sync_to_async
 from authentikate.models import Organization
 
-from bank_server.service import agent, service
+from bank_server.hook_agent import agent
+from bank_server.service import service
 from embeddings.healer import stale_queryset
 from finance import models
 from finance.scheduled import sync_all_accounts

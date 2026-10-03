@@ -1,14 +1,14 @@
-"""The actions of bank's HookAgent: what the hub's rekuest schedules here, per organization.
+"""The actions of bank's hook agent: work the hub's rekuest can ask for, per organization.
 
 ``sync_all_accounts`` syncs an organization's active syncers, unattended, within their budget;
 ``reembed_stale`` re-embeds its stale rows. Both are registered on the agent declared in
-``bank_server.service`` (vendored ``rekuest_service``); rekuest's manifest read gives the sync
-``sync.scheduled_every_seconds`` as its default schedule. Every organization has the agent and
-its own schedules, so a run is handed its organization's slug and does that organization's
-share of the work, nothing else. Nothing here loops or waits — each run is one pass, started by
-rekuest, and a run lost to a crash is simply followed by the next one.
+``bank_server.hook_agent`` (vendored ``rekuest_hook``). Every organization has the agent, so a
+run is handed its organization's slug and does that organization's share of the work, nothing
+else. The actions are only offered: nothing here schedules them, that is the organization's own
+automation. Nothing here loops or waits — each run is one pass, started by rekuest, and a run
+lost to a crash is simply followed by the next one.
 
-A scheduled sync is an ordinary :func:`finance.sync.sync_syncer` without the user's PSU
+An unattended sync is an ordinary :func:`finance.sync.sync_syncer` without the user's PSU
 headers: it takes the same lease (so it never collides with a user's sync on any replica) and
 spends from the same daily budget. It leaves ``sync.scheduled_reserve`` syncs of that budget
 untouched, so a user can still sync by hand the same day.
@@ -24,7 +24,7 @@ from django.utils import timezone
 from finance import models
 from finance.errors import SyncBudgetExhausted
 from finance.sync import AlreadySyncing, after_sync, sync_budget, sync_syncer
-from bank_server.service import agent
+from bank_server.hook_agent import agent
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,6 @@ def _due_syncers(organization: str) -> list[int]:
     interface="sync_all_accounts",
     name="Sync all bank accounts",
     description="Sync every active bank account of the organization that has sync budget to spare, unattended.",
-    default_interval=settings.BANK_SYNC.get("scheduled_every_seconds"),
 )
 async def sync_all_accounts(organization: str) -> dict:
     synced = skipped = failed = 0
@@ -79,16 +78,10 @@ def _reembed(organization: str) -> int:
     return reembed_all([models.Transaction, models.Category, models.CategoryTerm], max_batches=50, organization=organization)
 
 
-def _reembed_interval() -> int | None:
-    embeddings = getattr(settings, "EMBEDDINGS", {})
-    return embeddings.get("SWEEP_INTERVAL") if embeddings.get("ENABLED", True) else None
-
-
 @agent.action(
     interface="reembed_stale",
     name="Re-embed stale rows",
     description="Embed the organization's transactions, categories and category terms whose vector is missing or came from another model (after a model change, or when the model was unavailable at write time).",
-    default_interval=_reembed_interval(),
 )
 async def reembed_stale(organization: str) -> dict:
     return {"reembedded": await sync_to_async(_reembed)(organization)}
