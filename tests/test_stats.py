@@ -108,7 +108,14 @@ async def test_recurring_detection_and_forecast(seeded, aexecute):
     assert len(points) == horizon + 1
     rent_days = [p["date"] for prev, p in zip(points, points[1:]) if Decimal(p["amount"]) - Decimal(prev["amount"]) == Decimal("-900.00")]
     assert rent_days, points
-    assert all((datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days == 30 for a, b in zip(rent_days, rent_days[1:]))
+    # The history ends on 2026-09-01, so the rhythm is the 30 days counted from there. A rent
+    # that is overdue by less than an interval is expected tomorrow, once, off that rhythm.
+    first_due = datetime.date(2026, 10, 1)
+    days = [datetime.date.fromisoformat(d) for d in rent_days]
+    on_rhythm = [d for d in days if (d - first_due).days % 30 == 0]
+    assert on_rhythm, points
+    assert all((b - a).days == 30 for a, b in zip(on_rhythm, on_rhythm[1:]))
+    assert [d for d in days if d not in on_rhythm] in ([], [TODAY + datetime.timedelta(days=1)])
 
     # Ignored stays ignored on re-detection.
     again = await aexecute("mutation { detectRecurring { label } }")
