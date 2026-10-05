@@ -27,8 +27,8 @@ The consent flow is completed by the client; the server has no HTTP callback rou
    `completeBankLink(input: {code, state})`. A state is only accepted in the organization that
    started the link, and only once.
 
-The consented accounts appear under `bankAccounts`. Sync one immediately with `syncAccount(id)`;
-the hub's rekuest also syncs every account on a schedule (see below).
+The consented accounts appear under `bankAccounts`. Sync one with `syncAccount(id)`; an
+organization can also have the hub's rekuest sync all of them unattended (see below).
 
 When a consent expires, its connection turns `EXPIRED` (`needsReauth: true`). Linking the
 same bank again re-attaches the same accounts: they are keyed by Enable Banking's
@@ -51,11 +51,12 @@ cross-session identification hash, so history, categories and notes stay.
 - **Request/response only**: nothing loops in this service — no sweep, scheduler or worker.
   An account syncs when a client calls `syncAccount` / `syncConnection`, inside that request,
   sending the user's IP and user agent to the bank (the user is present).
-- **Scheduled syncs come from rekuest**: with `rekuest_hook` configured, the hub's rekuest runs
-  the `sync_all_accounts` action on a schedule (default every 12 h, `sync.scheduled_every_seconds`).
-  It syncs every active account unattended, through the same lease and the same daily budget,
-  and leaves `sync.scheduled_reserve` syncs of the day's budget for users. Change or pause the
-  schedule in rekuest, or trigger it there to sync everything now.
+- **Unattended syncs come from rekuest**: with `rekuest_hook` configured, the service offers
+  the hub's rekuest a `sync_all_accounts` action. It syncs every active account of one
+  organization, through the same lease and the same daily budget, and leaves
+  `sync.scheduled_reserve` syncs of the day's budget for users. The action is only offered:
+  nothing schedules it by default. Put it on a schedule or a trigger in rekuest, or run it
+  there by hand to sync everything now.
 - A sync takes a lease on the account first, so concurrent replicas — and a scheduled sync
   racing a user's — never sync the same account twice.
 - **Sync budget**: each account may sync `daily_sync_limit` times per UTC day (Enable Banking:
@@ -70,6 +71,23 @@ cross-session identification hash, so history, categories and notes stay.
   open (`openUrl`) and how it finishes (`REDIRECT` → `completeBankLink`, `POLL` →
   `completeScalableLink` every `interval` s). `resumeLink` returns a pending session again,
   `cancelLink` deletes it (creator only).
+
+## Importing a Finanzguru export
+
+History from before a bank was linked can be imported from a Finanzguru transaction export
+(`.xlsx`, or CSV with the same columns).
+
+1. Upload the file with `requestBigfileUpload` (temporary S3 credentials; needs the
+   `datalayer` block).
+2. `createFinanzguruImport` previews it: which account each source account lands in, what
+   applying would do, and the proposed category mappings (`importCategoryMappings`), which
+   can be edited first with `setImportCategoryMappings`. Nothing is written into the accounts yet.
+3. `applyStatementImport` writes it, and is safe to repeat. A row that pairs with a synced
+   booking (`imports.match_window_days`) enriches that row instead of duplicating it; a
+   later sync that finds an imported booking takes it over.
+
+`python manage.py import_finanzguru export.xlsx --org <id or slug> [--apply]` runs the same
+code path on a local file.
 
 ## Categories
 
@@ -169,23 +187,62 @@ includePending}` (the last 12 months by default). Money is Decimal and split per
 
 Amounts are `Decimal` scalars (strings on the wire), signed: negative is money out.
 
+## Hub integration
+
+Declared in [`bank_server/contract.py`](bank_server/contract.py):
+
+- **Scopes**: `bank_read`, `bank_write`.
+- **Needs**: rekuest 6 or newer, an instance key, `bigfile` storage, tokens issued by lok.
+
+bank is known to the hub's rekuest in two separate ways:
+
+- as a **service** (`_rekuest/service`): it hosts structures such as `@bank/bankaccount`,
+  `@bank/transaction`, `@bank/category` and `@bank/merchant`
+  ([`bank_server/service.py`](bank_server/service.py));
+- as a **hook agent** (`_rekuest/hook`): it offers two actions, `sync_all_accounts` and
+  `reembed_stale` ([`finance/scheduled.py`](finance/scheduled.py)). Both are only offered;
+  whether and when they run is the organization's own automation in rekuest.
+
+## Running
+
+The image is `jhnnsrs/bank`. It has no default command, and starting it takes two steps:
+
+```bash
+python -m arkitekt_service migrate   # wait for the database, migrate, ensureadmin
+bash run.sh                          # serve on :80 (daphne), and nothing else
+```
+
+`run-debug.sh` does both in one go with Django's autoreloading server, for development.
+
+It needs Postgres with pgvector and PostGIS
+([`jhnnsrs/daten`](https://github.com/arkitektio/daten-server)) and Redis, plus S3 (RustFS)
+for imports. GraphQL is served at `/graphql`, with the SDL at `/schema`.
+
 ## Development
 
 ```bash
 uv sync
-uv run --no-sync pytest       # brings up postgres + a fake Enable Banking API via dokker
+uv run --no-sync pytest       # brings up the stack below via dokker; needs Docker
 uv run python manage.py validate_settings
 ```
 
-The suite runs against a real Postgres and `tests/integration/fakebank`, a stand-in for the
-Enable Banking API. It serves real HTTP, verifies each request's RS256 application JWT, and is
-driven per test through its `/_admin` endpoints. Nothing in the service is mocked.
+The suite runs against a real stack, from `tests/integration/docker-compose.yaml`:
+
+- Postgres (`jhnnsrs/daten:next`, override with `DATEN_IMAGE`) and RustFS;
+- `fakebank`, a stand-in for the Enable Banking API. It serves real HTTP, verifies each
+  request's RS256 application JWT, and is driven per test through its `/_admin` endpoints;
+- `fakescalable`, `fakegeo` and `fakemarket`, stand-ins for Scalable, the geocoder and the
+  price sources.
+
+Nothing in the service is mocked.
 
 Configuration is documented in [CONFIG.md](CONFIG.md). The Enable Banking private key is
 mounted, never committed: `*.pem` is git-ignored.
 
-### Connecting from an app
+## Releases
 
-```bash
-arkitekt-server service connect --url http://localhost:8000 --identifier live.arkitekt.bank
-```
+Releases are tags: a push to `main` cuts a stable version, a push to `next` a release
+candidate. Each one publishes `jhnnsrs/bank` under its version (`X.Y.Z`, `X.Y`, `X`), plus
+`latest` from `main` and `next` from `next`. The `version` in `pyproject.toml` is a
+placeholder. Release notes are on
+[GitHub Releases](https://github.com/arkitektio/bank-server/releases).
