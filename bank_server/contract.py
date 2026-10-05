@@ -40,4 +40,5 @@ contract = Contract(
     ),
     settings=Settings,
     render=render,
+    setup=(("ensureadmin",),),
 )
