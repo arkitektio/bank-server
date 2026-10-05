@@ -20,7 +20,7 @@ from joserfc.jwk import OKPKey
 
 from bank_server.hook_agent import agent
 from bank_server.service import service
-from rekuest_service import trust
+from arkitekt_service import trust
 from tests.conftest import account, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)

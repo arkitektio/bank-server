@@ -2,7 +2,7 @@
 
 ``sync_all_accounts`` syncs an organization's active syncers, unattended, within their budget;
 ``reembed_stale`` re-embeds its stale rows. Both are registered on the agent declared in
-``bank_server.hook_agent`` (vendored ``rekuest_hook``). Every organization has the agent, so a
+``bank_server.hook_agent`` (``arkitekt_service.hook``). Every organization has the agent, so a
 run is handed its organization's slug and does that organization's share of the work, nothing
 else. The actions are only offered: nothing here schedules them, that is the organization's own
 automation. Nothing here loops or waits — each run is one pass, started by rekuest, and a run
