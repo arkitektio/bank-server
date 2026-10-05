@@ -1,0 +1,172 @@
+facts: 1
+me:
+  name: bank
+  path: bank
+  url: http://bank:80/bank
+  identifier: live.arkitekt.bank
+  secret_key: t873@^ow2@h46ug(=x)&f88&@ka6@f1og+*lvkyfyg6(r)k-$#
+  debug: false
+  allowed_hosts:
+  - '*'
+  admin:
+    email: null
+    password: qwyq9ukctkcfi0724p1u2a1q78yqsghwiboi1cy2
+    username: admin
+hub:
+  origins:
+  - http://localhost
+  - https://localhost
+  auth:
+    audience: '*'
+    issuers:
+    - iss: ''
+      jwks_uri: https:///.well-known/jwks.json
+      kind: jwks_uri
+    static_tokens: {}
+    provenance:
+      audience: '*'
+      issuers:
+      - iss: rekuest
+        jwks:
+          keys:
+          - alg: Ed25519
+            crv: Ed25519
+            kid: HlfV1uEsP7TtfrXImnXtNMBviddcc45GyqUplxklw88
+            kty: OKP
+            service: live.arkitekt.rekuest
+            use: sig
+            x: Qiqm2giUwSYaM4Ow_iR3clNG-liHEX74EQw5sGSYoVI
+        kind: jwks_dict
+database:
+  host: db
+  port: 5432
+  name: bank
+  username: quiet-forest
+  password: n4dvcm100nbl5fu9kkquj5e8pznovcwnp79y83yy
+redis:
+  host: redis
+  port: 6379
+storage:
+  role_arn: arn:aws:iam::000000000000:role/datalayer
+  session_duration_seconds: 3600
+  access_key: zjuqp7vbk3rb9uyrpffzwegw3rvi9g8xnbf1ze5a
+  secret_key: kqnzhxu3rz2l3y110tcxu8d2pvc5v0wonsavnq7p
+  host: rustfs
+  port: 9000
+  protocol: http
+  region: us-east-1
+  buckets:
+    bigfile: bankbigfile
+instance:
+  private_key: |
+    -----BEGIN PRIVATE KEY-----
+    MC4CAQAwBQYDK2VwBCIEIPVgREOXq/nPuYe6sGuhsbk4ORikiAiL07hpuJkzgQMY
+    -----END PRIVATE KEY-----
+  trust:
+    jwks:
+      keys:
+      - alg: Ed25519
+        crv: Ed25519
+        kid: HlfV1uEsP7TtfrXImnXtNMBviddcc45GyqUplxklw88
+        kty: OKP
+        service: live.arkitekt.rekuest
+        use: sig
+        x: Qiqm2giUwSYaM4Ow_iR3clNG-liHEX74EQw5sGSYoVI
+      - alg: Ed25519
+        crv: Ed25519
+        kid: H3SkgkYNXDiZUtcIbUfT4nd5pQS3n6yXha-RZ-f_6yk
+        kty: OKP
+        service: live.arkitekt.kabinet
+        use: sig
+        x: MKzCwHgxNpMPG-8SF755-yWDWd4B7ojfDX36Ishujog
+      - alg: Ed25519
+        crv: Ed25519
+        kid: KYAlWaKZdARPfu-mtBqXgTgH2qHswDT9El70b45K2yk
+        kty: OKP
+        service: live.arkitekt.mikro
+        use: sig
+        x: FY96f6kQkfMHXdDx5ib0hFkkwW5tfhqp7sagG-xjewE
+      - alg: Ed25519
+        crv: Ed25519
+        kid: YN4vjcPblTDgoT7xI-5-MQqji0pVUBHYOcRvVvkHm70
+        kty: OKP
+        service: live.arkitekt.fluss
+        use: sig
+        x: FDcS8Vjc1iX5b1uVgLMP3KgHUTI3Kaq9rk6DWnQZIGo
+      - alg: Ed25519
+        crv: Ed25519
+        kid: UQr8c1KUx-_Jdj-e55VaIn4cGcEjWPDIL5M9_ADS7OM
+        kty: OKP
+        service: live.arkitekt.kraph
+        use: sig
+        x: OOSGfk7BLGWhCDjjD0hQpWyHYrz4AD8Txu5aFs2Tkk4
+      - alg: Ed25519
+        crv: Ed25519
+        kid: 0gj3Y10aXB3vz7BrP8FBi--9G3bMKmnPp2isHtWcJ_8
+        kty: OKP
+        service: live.arkitekt.bank
+        use: sig
+        x: Hd9vxovL2TWG60N3QfYJBNwDEQQrAF-754DLx3l6Kq0
+      - alg: Ed25519
+        crv: Ed25519
+        kid: e4FPItneaZelUMmoLJff0zx_jTtlXlLWDwbAkmB4PxY
+        kty: OKP
+        service: live.arkitekt.kuvert
+        use: sig
+        x: cBVEbvJq4FiwZHWHt9Vj1ozj-wOIXiDLZTimFBNj8FU
+      - alg: Ed25519
+        crv: Ed25519
+        kid: rL6Uw-TEA2tB88VoyjCige5qe0iEUPYa1QE-Dsn7NIA
+        kty: OKP
+        service: live.arkitekt.dokuments
+        use: sig
+        x: 8EVk4y5BrT2aLA2wBm9VYDWQTOxDZkB4FnsutH5FMis
+      - alg: Ed25519
+        crv: Ed25519
+        kid: qN20TpXPMOUHeC8t0dGR4TnwkjjXHzIW2ygWKHAAwqo
+        kty: OKP
+        service: live.arkitekt.lokate
+        use: sig
+        x: POhFN7iS46yL1yYv7xVZaTwxeHleRhs_ko2rkFSzVbU
+peers:
+  rekuest:
+    identifier: live.arkitekt.rekuest
+    url: http://rekuest:80/rekuest
+    offers:
+      agent: http://rekuest-takt:8080/rekuest
+  kabinet:
+    identifier: live.arkitekt.kabinet
+    url: http://kabinet:80/kabinet
+    offers:
+      rekuest_hook: http://kabinet:80/kabinet/_rekuest/hook
+      rekuest_service: http://kabinet:80/kabinet/_rekuest/service
+  mikro:
+    identifier: live.arkitekt.mikro
+    url: http://mikro:80/mikro
+    offers:
+      rekuest_hook: http://mikro:80/mikro/_rekuest/hook
+      rekuest_service: http://mikro:80/mikro/_rekuest/service
+  fluss:
+    identifier: live.arkitekt.fluss
+    url: http://fluss:80/fluss
+    offers:
+      rekuest_hook: http://fluss:80/fluss/_rekuest/hook
+      rekuest_service: http://fluss:80/fluss/_rekuest/service
+  kraph:
+    identifier: live.arkitekt.kraph
+    url: http://kraph:80/kraph
+    offers: {}
+  kuvert:
+    identifier: live.arkitekt.kuvert
+    url: http://kuvert:80/kuvert
+    offers:
+      rekuest_hook: http://kuvert:80/kuvert/_rekuest/hook
+      rekuest_service: http://kuvert:80/kuvert/_rekuest/service
+  dokuments:
+    identifier: live.arkitekt.dokuments
+    url: http://dokuments:80/dokuments
+    offers: {}
+  lokate:
+    identifier: live.arkitekt.lokate
+    url: http://lokate:80/lokate
+    offers: {}
