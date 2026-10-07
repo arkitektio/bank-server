@@ -38,3 +38,14 @@ WORKDIR /workspace
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/models /opt/models
 COPY . .
+# Where this code came from, said by the build (`--build-arg`; the release workflow passes the
+# repository and the commit): `describe` reports it as `source`. Last, so that a new commit
+# invalidates no layer above. Empty for a local build, which then names no source.
+ARG ARKITEKT_SOURCE_REPOSITORY=""
+ARG ARKITEKT_SOURCE_REVISION=""
+ENV ARKITEKT_SOURCE_REPOSITORY=${ARKITEKT_SOURCE_REPOSITORY} \
+    ARKITEKT_SOURCE_REVISION=${ARKITEKT_SOURCE_REVISION}
+# With no command, a container of this image says what it is and stops: that is how an
+# installer asks, knowing nothing of what is inside. How it serves, how it is prepared and
+# what else can be run in it are in the answer (`serve`, `debug`, `jobs`).
+CMD ["arkitekt-service", "describe"]

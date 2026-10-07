@@ -37,12 +37,13 @@ hub:
             use: sig
             x: Qiqm2giUwSYaM4Ow_iR3clNG-liHEX74EQw5sGSYoVI
         kind: jwks_dict
-database:
-  host: db
-  port: 5432
-  name: bank
-  username: quiet-forest
-  password: n4dvcm100nbl5fu9kkquj5e8pznovcwnp79y83yy
+databases:
+  main:
+    host: db
+    port: 5432
+    name: bank
+    username: quiet-forest
+    password: n4dvcm100nbl5fu9kkquj5e8pznovcwnp79y83yy
 redis:
   host: redis
   port: 6379
