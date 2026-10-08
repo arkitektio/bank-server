@@ -32,7 +32,7 @@ dependencies = [
     "boto3>=1.38.9",
     "django-polymorphic>=4.1.0",
     "openpyxl>=3.1",
-    "arkitekt-service>=1.11.0",
+    "arkitekt-service>=3.0.0",
 ]
 
 [dependency-groups]
