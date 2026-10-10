@@ -6,7 +6,7 @@ on accounts and connections, so a client handles both with one table.
 
 from kante.errors import KanteError, ValidationError
 
-from finance import linking
+from finance.providers.errors import LinkError
 from finance.errors import SyncBudgetExhausted, code_for
 
 
@@ -14,7 +14,7 @@ def translate(error: Exception) -> Exception:
     """A GraphQL error for a known failure; anything else (a bug) passes through unchanged."""
     if isinstance(error, KanteError):
         return error
-    if isinstance(error, linking.LinkError) and error.code is None:
+    if isinstance(error, LinkError) and error.code is None:
         return ValidationError(str(error))
     code = code_for(error)
     if code is None:

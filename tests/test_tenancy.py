@@ -23,7 +23,7 @@ async def tenant_a(link, aexecute, fakebank):
     return {"connection": connection["id"], "account": acc_id, "transaction": tx_id, "category": category_id}
 
 
-LISTS = ["bankConnections { id }", "bankAccounts { id }", "transactions { id }", "categories { id }", "categoryRules { id }", "budgets { id }", "recurringPayments { id }"]
+LISTS = ["bankProviders { id }", "bankConnections { id }", "bankAccounts { id }", "transactions { id }", "categories { id }", "categoryRules { id }", "budgets { id }", "recurringPayments { id }"]
 
 
 @pytest.mark.parametrize("selection", LISTS)
@@ -73,15 +73,15 @@ async def test_cannot_categorize_with_a_foreign_category(tenant_a, aexecute, oth
     assert result.errors[0].extensions["code"] == "NOT_FOUND"
 
 
-async def test_link_state_from_another_org_is_refused(aexecute, other_org_context, fakebank):
+async def test_link_state_from_another_org_is_refused(aexecute, other_org_context, fakebank, eb_provider):
     """Tenant B cannot complete a link tenant A started, even holding its code and state."""
     fakebank.scenario([account()])
-    started = await aexecute('mutation($a: String!) { startBankLink(input: {aspspName: $a, country: "AT"}) { state } }', {"a": fakebank.aspsp})
-    state = started.data["startBankLink"]["state"]
+    started = await aexecute('mutation($a: String!, $p: ID!) { startLink(input: {provider: $p, institution: $a, country: "AT"}) { state } }', {"a": fakebank.aspsp, "p": eb_provider})
+    state = started.data["startLink"]["state"]
     code = fakebank.approve(state)
 
     result = await aexecute(
-        'mutation($c: String!, $s: String!) { completeBankLink(input: {code: $c, state: $s}) { id } }',
+        'mutation($c: String!, $s: String!) { completeAuth(input: {code: $c, state: $s}) { status } }',
         {"c": code, "s": state},
         context=other_org_context,
         allow_errors=True,

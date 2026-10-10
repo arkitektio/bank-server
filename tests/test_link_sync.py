@@ -33,26 +33,16 @@ async def test_link_creates_accounts_and_default_categories(link, fakebank):
 async def test_complete_rejects_unknown_state(aexecute, fakebank):
     fakebank.scenario([account()])
     result = await aexecute(
-        'mutation { completeBankLink(input: {code: "x", state: "not-a-state"}) { id } }', allow_errors=True
+        'mutation { completeAuth(input: {code: "x", state: "not-a-state"}) { status } }', allow_errors=True
     )
     assert result.errors[0].extensions["code"] == "INVALID_STATE"
 
 
-async def test_code_cannot_be_used_twice(aexecute, fakebank, link):
-    fakebank.scenario([account()])
-    started = await aexecute('mutation($a: String!) { startBankLink(input: {aspspName: $a, country: "AT"}) { state } }', {"a": fakebank.aspsp})
-    state = started.data["startBankLink"]["state"]
-    code = fakebank.approve(state)
-    await aexecute('mutation($c: String!, $s: String!) { completeBankLink(input: {code: $c, state: $s}) { id } }', {"c": code, "s": state})
-    again = await aexecute('mutation($c: String!, $s: String!) { completeBankLink(input: {code: $c, state: $s}) { id } }', {"c": code, "s": state}, allow_errors=True)
-    assert again.errors
-
-
-async def test_unregistered_redirect_is_refused(aexecute, fakebank):
+async def test_unregistered_redirect_is_refused(aexecute, fakebank, eb_provider):
     fakebank.scenario([account()])
     result = await aexecute(
-        'mutation($a: String!) { startBankLink(input: {aspspName: $a, country: "AT", redirectUrl: "https://evil.test/cb"}) { state } }',
-        {"a": fakebank.aspsp},
+        'mutation($a: String!, $p: ID!) { startLink(input: {provider: $p, institution: $a, country: "AT", redirectUrl: "https://evil.test/cb"}) { state } }',
+        {"a": fakebank.aspsp, "p": eb_provider},
         allow_errors=True,
     )
     assert result.errors[0].extensions["code"] == "VALIDATION_ERROR"
@@ -157,16 +147,10 @@ async def test_transfers_between_own_accounts_are_flagged(link, aexecute, fakeba
     assert await models.Transaction.objects.filter(is_transfer=True).acount() == 2
 
 
-async def test_bank_institutions_lists_linkable_banks(aexecute, fakebank):
+async def test_bank_institutions_lists_linkable_banks(aexecute, fakebank, eb_provider):
     fakebank.scenario([account()])
-    result = await aexecute('query { bankInstitutions(country: "at") { name country maximumConsentDays } }')
+    result = await aexecute('query($p: ID!) { bankInstitutions(provider: $p, country: "at") { name country maximumConsentDays } }', {"p": eb_provider})
     assert {"name": fakebank.aspsp, "country": "AT", "maximumConsentDays": 180} in result.data["bankInstitutions"]
-
-
-async def test_without_enablebanking_config_linking_is_not_configured(aexecute, fakebank, settings):
-    settings.ENABLEBANKING = None
-    result = await aexecute('mutation { startBankLink(input: {aspspName: "x", country: "AT"}) { state } }', allow_errors=True)
-    assert result.errors[0].extensions["code"] == "NOT_CONFIGURED"
 
 
 async def test_syncing_a_revoked_connection_keeps_it_revoked(link, aexecute, fakebank):

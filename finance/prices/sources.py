@@ -249,9 +249,15 @@ class Scalable:
         from finance.scalable.client import ScalableClient
         from finance.scalable.tokens import session_for
 
-        connection = await models.BankConnection.objects.filter(organization_id=self.organization_id, provider=models.Provider.SCALABLE, status=models.ConnectionStatus.ACTIVE).afirst()
+        connection = (
+            await models.BankConnection.objects.filter(organization_id=self.organization_id, provider=models.Provider.SCALABLE, status=models.ConnectionStatus.ACTIVE)
+            # Only a login whose provider an admin lets price securities.
+            .filter(bank_provider__enabled=True, bank_provider__capabilities__contains=[models.ProviderCapability.PRICES.value])
+            .order_by("id")
+            .afirst()
+        )
         if connection is None:
-            raise PriceError("No active Scalable login in this organization.")
+            raise PriceError("No active Scalable login with security prices switched on in this organization.")
         portfolio = await models.AccountSyncer.objects.filter(connection=connection, account__kind=models.AccountKind.DEPOT).values_list("remote_id", flat=True).afirst()
         async with ScalableClient() as client:
             active = await session_for(connection.id, client)
@@ -293,7 +299,7 @@ def source_for(name: str, http: aiohttp.ClientSession, organization_id: int) -> 
     """The source implementation, or None when it is disabled or not configured."""
     c = conf()
     if name == models.PriceSource.SCALABLE:
-        return Scalable(organization_id) if getattr(settings, "SCALABLE", None) else None
+        return Scalable(organization_id)
     if name == models.PriceSource.TWELVEDATA:
         return TwelveData(http) if c.get("twelvedata_api_key") else None
     if name == models.PriceSource.YAHOO:

@@ -15,17 +15,48 @@ balance forecasts over GraphQL.
 Everything belongs to an **organization**: every read and write is scoped to the caller's
 active organization, and any member may link banks, sync, categorize and budget.
 
+## Providers
+
+Banks are reached through a **provider** the organization set up: a row holding a kind, its
+settings and credentials, and the capabilities switched on for it. Only an admin of the
+organization creates, changes or deletes one; any member links through it.
+
+- `providerKinds` lists what this server can run, each kind with its capabilities
+  (`TRANSACTIONS`, `BALANCES`, `HOLDINGS`, `PRICES`, `SCHEDULED_SYNC`), so a client offers them
+  without knowing the kinds itself.
+- `createEnableBankingProvider(input: {name, appId, privateKey, …})` takes the application id and
+  the text of its `.pem`. Both are proven at Enable Banking (`GET /application`) before anything
+  is stored; the key is kept Fernet-encrypted and never returned (`keyFingerprint` tells which
+  one is in use). `createScalableProvider` needs no credentials.
+- `updateProvider` renames, enables or disables any provider and sets its `capabilities`: a
+  capability switched off is neither fetched nor stored, `SCHEDULED_SYNC` decides whether
+  `sync_all_accounts` touches its accounts, `PRICES` whether its logins price securities.
+- `deleteProvider` is refused while connections are active or pending.
+
+A new kind is one module in `finance/providers/` implementing `ProviderBackend`
+(`finance/providers/base.py`) and one entry in `finance/providers/registry.py`; its settings live
+in the row's JSON, so it needs no migration.
+
 ## Linking a bank
 
-The consent flow is completed by the client; the server has no HTTP callback route.
+The login is completed by the client; the server has no HTTP callback route.
 
-1. `bankInstitutions(country: "AT")` lists the banks that can be linked.
-2. `startBankLink(input: {aspspName, country, redirectUrl?})` returns `authUrl`. Send the user
-   there. `redirectUrl` must be one of the server's registered `enablebanking.redirect_urls`.
-3. After approval, the bank redirects to the redirect URL with `?code=...&state=...`. The
-   client catches it (or the user pastes the URL) and calls
-   `completeBankLink(input: {code, state})`. A state is only accepted in the organization that
-   started the link, and only once.
+1. `bankProviders` lists the organization's providers. For a kind with institutions
+   (`kindInfo.hasInstitutions`), `bankInstitutions(provider, country: "AT")` lists its banks.
+2. `startLink(input: {provider, institution?, country?, redirectUrl?})` returns an `AuthSession`.
+   Send the user to its `openUrl`.
+3. By the session's `finish`: `REDIRECT` — the bank redirects to `redirectUrl` with
+   `?code=...&state=...`; the client catches it (or the user pastes the URL) and calls
+   `completeAuth(input: {state, code})`. `POLL` — the client calls
+   `completeAuth(input: {state})` every `interval` seconds until `status` is no longer `PENDING`.
+
+The login follows the external auth flow contract every service shares: `completeAuth`,
+`resumeAuth(state)`, `cancelAuth(state)` and `authSession(state)` all answer with the
+`AuthSession` (`status` PENDING, DONE, FAILED, EXPIRED or CANCELLED; `step`; `errorCode` and
+`errorMessage`; `result`, the linked connection). A state is only answered to the member who
+started the login, in their organization. A settled login is answered again as it is, so
+`completeAuth` can be called twice; a bank's refusal is passed on with
+`completeAuth(input: {state, error, errorDescription})`.
 
 The consented accounts appear under `bankAccounts`. Sync one with `syncAccount(id)`; an
 organization can also have the hub's rekuest sync all of them unattended (see below).
@@ -67,10 +98,8 @@ cross-session identification hash, so history, categories and notes stay.
 - **Error codes**: every GraphQL error carries `extensions.code`, and accounts and connections
   carry `lastErrorCode` next to `lastError` — one `BankErrorCode` enum (`CONSENT_EXPIRED`,
   `RATE_LIMITED`, `MFA_REJECTED`, `CODE_EXPIRED`, `INVALID_STATE`, `BANK_UNAVAILABLE`, …).
-- **Auth sessions**: `startBankLink` / `startScalableLink` return an `AuthSession` — what to
-  open (`openUrl`) and how it finishes (`REDIRECT` → `completeBankLink`, `POLL` →
-  `completeScalableLink` every `interval` s). `resumeLink` returns a pending session again,
-  `cancelLink` deletes it (creator only).
+- **Auth sessions**: see *Linking a bank*. A connection you started and have not finished
+  carries `pendingAuth`; continue it with `resumeAuth(state)` or drop it with `cancelAuth(state)`.
 
 ## Importing a Finanzguru export
 

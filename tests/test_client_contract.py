@@ -1,4 +1,4 @@
-"""The Orkestrator client contract: auth sessions, resume/cancel, sync budget, error codes,
+"""The Orkestrator client contract (logins are in ``test_auth_contract``): sync budget, error codes,
 bulk mutations, filters, ordering and counts — all request/response, end to end against the fakes.
 """
 
@@ -8,19 +8,10 @@ import pytest
 from django.utils import timezone
 
 from finance import models
-from tests.conftest import SCALABLE_COMPLETE, account, cash, trade, tx
+from tests.conftest import account, cash, trade, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-START_BANK = """
-mutation($a: String!) { startBankLink(input: {aspspName: $a, country: "AT"}) {
-  state openUrl finish interval userCode redirectUrl expiresAt connection { id status } } }
-"""
-START_SCALABLE = """
-mutation { startScalableLink { state openUrl finish interval userCode redirectUrl expiresAt connection { id status } } }
-"""
-RESUME = "mutation($c: ID!) { resumeLink(connection: $c) { state openUrl finish userCode } }"
-CANCEL = "mutation($c: ID!) { cancelLink(connection: $c) }"
 BUDGET = """
 query($a: ID!, $c: ID!) {
   bankAccount(id: $a) { syncsRemainingToday nextSyncAllowedAt lastError lastErrorCode }
@@ -32,100 +23,6 @@ SYNC = "mutation($id: ID!) { syncAccount(id: $id) { created } }"
 
 def _tomorrow_utc() -> str:
     return (timezone.now().astimezone(timezone.UTC).date() + timedelta(days=1)).isoformat()
-
-
-# --- §1 auth sessions ------------------------------------------------------------------------
-
-
-async def test_start_bank_link_is_a_redirect_session(aexecute, fakebank):
-    fakebank.scenario([account()])
-
-    session = (await aexecute(START_BANK, {"a": fakebank.aspsp})).data["startBankLink"]
-
-    assert session["finish"] == "REDIRECT"
-    assert f"state={session['state']}" in session["openUrl"]
-    assert session["redirectUrl"] == "https://bank.test/callback"
-    assert session["interval"] is None and session["userCode"] is None
-    assert session["connection"]["status"] == "PENDING"
-
-
-async def test_start_scalable_link_is_a_poll_session(aexecute, fakescalable):
-    fakescalable.config(interval=3)
-
-    session = (await aexecute(START_SCALABLE)).data["startScalableLink"]
-
-    assert session["finish"] == "POLL"
-    assert session["openUrl"].endswith(f"user_code={session['userCode']}")
-    assert session["interval"] == 3 and session["redirectUrl"] is None
-
-
-# --- §2 resume and cancel ---------------------------------------------------------------------
-
-
-async def test_a_closed_dialog_resumes_the_scalable_login_through_mfa(aexecute, fakescalable):
-    fakescalable.seed({"p1": {"cash": 1}}, mfa=True)
-    started = (await aexecute(START_SCALABLE)).data["startScalableLink"]
-    fakescalable.approve(started["userCode"])
-    await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})  # now waiting for the phone; the dialog closes
-
-    resumed = (await aexecute(RESUME, {"c": started["connection"]["id"]})).data["resumeLink"]
-    fakescalable.mfa("SUCCESS")
-    done = (await aexecute(SCALABLE_COMPLETE, {"state": resumed["state"]})).data["completeScalableLink"]
-
-    assert resumed == {"state": started["state"], "openUrl": started["openUrl"], "finish": "POLL", "userCode": started["userCode"]}
-    assert done["status"] == "ACTIVE"
-
-
-async def test_only_the_creator_resumes_or_cancels_and_only_while_pending(aexecute, fakebank, colleague_context, link):
-    fakebank.scenario([account()])
-    started = (await aexecute(START_BANK, {"a": fakebank.aspsp})).data["startBankLink"]
-    pending = started["connection"]["id"]
-
-    by_colleague = await aexecute(RESUME, {"c": pending}, context=colleague_context, allow_errors=True)
-    cancel_by_colleague = await aexecute(CANCEL, {"c": pending}, context=colleague_context, allow_errors=True)
-    resumed = (await aexecute(RESUME, {"c": pending})).data["resumeLink"]
-    active = await link()
-    resume_active = await aexecute(RESUME, {"c": active["id"]}, allow_errors=True)
-
-    assert by_colleague.errors[0].extensions["code"] == "PERMISSION_DENIED"
-    assert cancel_by_colleague.errors[0].extensions["code"] == "PERMISSION_DENIED"
-    assert resumed["state"] == started["state"] and resumed["finish"] == "REDIRECT"
-    assert resume_active.errors[0].extensions["code"] == "INVALID_STATE"
-
-
-async def test_an_expired_pending_link_reads_as_abandoned(aexecute, fakebank):
-    fakebank.scenario([account()])
-    pending = (await aexecute(START_BANK, {"a": fakebank.aspsp})).data["startBankLink"]["connection"]["id"]
-    fresh = (await aexecute("query($c: ID!) { bankConnection(id: $c) { pendingExpiresAt isAbandoned } }", {"c": pending})).data["bankConnection"]
-    await models.BankConnection.objects.filter(id=pending).aupdate(pending_expires_at=timezone.now() - timedelta(minutes=1))
-
-    stale = (await aexecute("query($c: ID!) { bankConnection(id: $c) { status isAbandoned } }", {"c": pending})).data["bankConnection"]
-
-    assert fresh["pendingExpiresAt"] is not None and fresh["isAbandoned"] is False
-    assert stale == {"status": "PENDING", "isAbandoned": True}
-
-
-async def test_cancel_deletes_a_pending_link(aexecute, fakebank):
-    fakebank.scenario([account()])
-    pending = (await aexecute(START_BANK, {"a": fakebank.aspsp})).data["startBankLink"]["connection"]["id"]
-
-    cancelled = (await aexecute(CANCEL, {"c": pending})).data["cancelLink"]
-    listed = (await aexecute("{ bankConnections { id } }")).data["bankConnections"]
-
-    assert cancelled == pending
-    assert pending not in [c["id"] for c in listed]
-
-
-async def test_cancelling_a_scalable_login_waiting_for_mfa_logs_it_out(aexecute, fakescalable):
-    fakescalable.seed({"p1": {"cash": 1}}, mfa=True)
-    started = (await aexecute(START_SCALABLE)).data["startScalableLink"]
-    fakescalable.approve(started["userCode"])
-    await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})
-
-    await aexecute(CANCEL, {"c": started["connection"]["id"]})
-
-    assert fakescalable.families() == [{"revoked": True, "refreshes": 0}]
-    assert not await models.BankConnection.objects.filter(id=started["connection"]["id"]).aexists()
 
 
 # --- §3 sync budget and §4 error codes -------------------------------------------------------
@@ -195,26 +92,6 @@ async def test_expired_consent_is_coded_on_account_and_connection(link, aexecute
 
     assert failed.errors[0].extensions["code"] == "CONSENT_EXPIRED"
     assert state == {"status": "EXPIRED", "lastErrorCode": "CONSENT_EXPIRED", "accounts": [{"lastErrorCode": "CONSENT_EXPIRED"}]}
-
-
-async def test_a_denied_second_factor_is_coded_on_the_connection(aexecute, fakescalable):
-    fakescalable.seed({"p1": {"cash": 1}}, mfa=True)
-    started = (await aexecute(START_SCALABLE)).data["startScalableLink"]
-    fakescalable.approve(started["userCode"])
-    await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})
-    fakescalable.mfa("DENY")
-
-    first = await aexecute(SCALABLE_COMPLETE, {"state": started["state"]}, allow_errors=True)
-    again = await aexecute(SCALABLE_COMPLETE, {"state": started["state"]}, allow_errors=True)
-    stored = await models.BankConnection.objects.aget(id=started["connection"]["id"])
-
-    assert first.errors[0].extensions["code"] == again.errors[0].extensions["code"] == "MFA_REJECTED"
-    assert stored.last_error_code == "MFA_REJECTED"
-
-
-async def test_an_unknown_state_is_invalid_state(aexecute):
-    result = await aexecute('mutation { completeScalableLink(state: "nope") { id } }', allow_errors=True)
-    assert result.errors[0].extensions["code"] == "INVALID_STATE"
 
 
 # --- §5 bulk mutations -----------------------------------------------------------------------

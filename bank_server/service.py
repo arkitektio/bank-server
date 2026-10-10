@@ -34,6 +34,11 @@ bankconnection = service.structure(
     "@bank/bankconnection",
     describe=lambda connection: {"@bank/status": str(connection.status), "@bank/provider": str(connection.provider)},
 )
+bankprovider = service.structure(
+    models.BankProvider,
+    "@bank/bankprovider",
+    describe=lambda provider: {"@bank/provider": str(provider.kind), "@bank/enabled": provider.enabled},
+)
 bank_account = service.structure(
     models.BankAccount,
     "@bank/bankaccount",
@@ -64,6 +69,7 @@ transaction = service.structure(
 org = organization_of()
 
 service.model_signal(bankconnection, organization=org)
+service.model_signal(bankprovider, organization=org)
 #: Also emitted by hand, once per sync (``finance.sync._signal_sync``).
 bank_account_signal = service.model_signal(bank_account, organization=org)
 service.model_signal(statementimport, organization=org)

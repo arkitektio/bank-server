@@ -30,6 +30,7 @@ class ConnectionStatus(models.TextChoices):
     EXPIRED = "EXPIRED", "Consent ran out or was withdrawn at the bank; relink to continue"
     REVOKED = "REVOKED", "Revoked by a user of this service"
     FAILED = "FAILED", "The link was never completed"
+    CANCELLED = "CANCELLED", "The user dropped the login before it was finished"
 
 
 class Provider(models.TextChoices):
@@ -37,6 +38,16 @@ class Provider(models.TextChoices):
 
     ENABLEBANKING = "ENABLEBANKING", "A PSD2 bank consent via Enable Banking"
     SCALABLE = "SCALABLE", "A Scalable Capital broker login via Scalable's official CLI API"
+
+
+class ProviderCapability(models.TextChoices):
+    """Something a provider kind can do, switched on or off per provider."""
+
+    TRANSACTIONS = "TRANSACTIONS", "Fetch and store the accounts' transactions"
+    BALANCES = "BALANCES", "Store the balance the provider reports on every sync"
+    HOLDINGS = "HOLDINGS", "Store a depot's positions on every sync"
+    PRICES = "PRICES", "Use the provider's logins as a source of security prices"
+    SCHEDULED_SYNC = "SCHEDULED_SYNC", "Let the unattended sync action sync its accounts"
 
 
 class AccountKind(models.TextChoices):
@@ -68,6 +79,7 @@ class BankErrorCode(models.TextChoices):
     CONNECTION_INACTIVE = "CONNECTION_INACTIVE", "The connection is revoked, failed or still pending"
     SYNC_IN_PROGRESS = "SYNC_IN_PROGRESS", "Another sync holds the account right now"
     NOT_CONFIGURED = "NOT_CONFIGURED", "This server has no credentials for the provider"
+    LOGIN_REFUSED = "LOGIN_REFUSED", "The provider refused the login (the user cancelled there, or the bank said no); start over"
 
 
 class TransactionKind(models.TextChoices):
@@ -196,11 +208,42 @@ class RecurringStatus(models.TextChoices):
     IGNORED = "IGNORED", "Ignored; never proposed again"
 
 
+class BankProvider(models.Model):
+    """A provider an organization set up: one kind, its settings and credentials, and what is switched on.
+
+    For Enable Banking that is one application (its id in ``settings``, its private key
+    Fernet-encrypted in ``secret``, see :mod:`finance.crypto`); a Scalable provider holds no
+    credentials. The code of a kind is its backend (:mod:`finance.providers`), which validates
+    ``settings`` and reads ``capabilities``; a kind needing other settings needs no migration.
+    """
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_providers", help_text="The organization this provider belongs to.")
+    creator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="bank_providers", help_text="The admin who set it up.")
+    kind = models.CharField(max_length=20, choices=Provider.choices, help_text="Which provider this is an instance of.")
+    name = models.CharField(max_length=200, help_text="What the organization calls it.")
+    enabled = models.BooleanField(default=True, help_text="A disabled provider starts no links and syncs nothing; its consents can still be revoked.")
+    capabilities = models.JSONField(default=list, blank=True, help_text="The ProviderCapability values switched on, a subset of what the kind can do.")
+    settings = models.JSONField(default=dict, blank=True, help_text="The kind's non-secret settings (Enable Banking: application id, redirect URLs, consent days).")
+    secret = models.TextField(null=True, blank=True, help_text="Encrypted credentials of the kind (Enable Banking: the application's private key). Never exposed.")
+    daily_sync_limit = models.PositiveIntegerField(null=True, blank=True, help_text="Syncs per account per UTC day before the service stops asking the provider; null is unlimited.")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="When the provider was set up.")
+    updated_at = models.DateTimeField(auto_now=True, help_text="When it was last changed.")
+    provenance = ProvenanceField(excluded_fields=["secret"])
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "name"], name="bank_provider_org_name"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} [{self.kind}]"
+
+
 class BankConnection(models.Model):
     """One consent at one bank (an Enable Banking session) or one Scalable Capital login.
 
     A Scalable connection keeps its credentials — the DPoP private key and the rotating refresh
-    token bound to it — Fernet-encrypted in ``secret`` (see :mod:`finance.scalable.crypto`).
+    token bound to it — Fernet-encrypted in ``secret`` (see :mod:`finance.crypto`).
     """
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_connections", help_text="The organization this connection belongs to.")
@@ -218,7 +261,8 @@ class BankConnection(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, help_text="When the link was started.")
     linked_at = models.DateTimeField(null=True, blank=True, help_text="When the link was completed.")
     raw = models.JSONField(default=dict, blank=True, help_text="The session as Enable Banking returned it.")
-    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.ENABLEBANKING, help_text="Who the accounts are reached through.")
+    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.ENABLEBANKING, help_text="The kind of provider the accounts are reached through.")
+    bank_provider = models.ForeignKey(BankProvider, on_delete=models.SET_NULL, null=True, blank=True, related_name="connections", help_text="The organization's provider this consent was made through; null until it is attached to one.")
     secret = models.TextField(null=True, blank=True, help_text="Encrypted provider credentials (Scalable: DPoP key and tokens). Never exposed.")
     provider_user_id = models.CharField(max_length=200, null=True, blank=True, help_text="The user's id at the provider (Scalable: the person id).")
     token_expires_at = models.DateTimeField(null=True, blank=True, help_text="When the stored access token runs out (Scalable).")

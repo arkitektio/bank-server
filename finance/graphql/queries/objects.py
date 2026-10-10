@@ -10,12 +10,14 @@ from kante.types import Info
 from finance import filters as filters_module
 from finance import models, types
 from finance.scoping import for_org
-from finance.enablebanking.client import EnableBankingClient
+from finance.providers.registry import usable
 from finance.graphql.errors import translate
-from finance.graphql.utils import get_or_404
+from finance.graphql.utils import aget_or_404, get_or_404
 
 __all__ = [
     "bank_connection",
+    "bank_provider",
+    "provider_kinds",
     "bank_account",
     "transaction",
     "category",
@@ -64,23 +66,24 @@ def recurring_payment(info: Info, id: strawberry.ID) -> types.RecurringPayment:
     return get_or_404(models.RecurringPayment, info, id)
 
 
-async def bank_institutions(info: Info, country: str) -> list[types.Institution]:
-    """The banks Enable Banking can link in a country (ISO code, e.g. ``AT``)."""
+def bank_provider(info: Info, id: strawberry.ID) -> types.BankProvider:
+    """A provider by id."""
+    return get_or_404(models.BankProvider, info, id)
+
+
+def provider_kinds(info: Info) -> list[types.ProviderKind]:
+    """The kinds of provider this server can run, each with what it can do."""
+    return [types.provider_kind(kind) for kind in models.Provider.values]
+
+
+async def bank_institutions(info: Info, provider: strawberry.ID, country: str) -> list[types.Institution]:
+    """The banks a provider can link in a country (ISO code, e.g. ``AT``); empty for a kind without institutions."""
+    row = await aget_or_404(models.BankProvider, info, provider)
     try:
-        async with EnableBankingClient() as eb:
-            aspsps = await eb.aspsps(country.upper())
+        institutions = await usable(row, "This lookup").institutions(country.upper())
     except Exception as error:
         raise translate(error) from error
-    return [
-        types.Institution(
-            name=a["name"],
-            country=a.get("country", country.upper()),
-            logo=a.get("logo"),
-            bic=a.get("bic"),
-            maximum_consent_days=(a.get("maximum_consent_validity") or 0) // 86400 or None,
-        )
-        for a in aspsps
-    ]
+    return [types.Institution(name=i.name, country=i.country, logo=i.logo, bic=i.bic, maximum_consent_days=i.maximum_consent_days) for i in institutions]
 
 
 def holdings(info: Info, account: strawberry.ID, date: Optional[datetime.date] = None) -> list[types.HoldingSnapshot]:

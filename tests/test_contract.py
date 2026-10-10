@@ -39,6 +39,7 @@ def test_its_config_is_written_from_what_the_hub_says(tmp_path: Path, capsys: py
     assert config["django"]["force_script_name"] == "bank"
     assert config["postgres"]["db_name"] == "bank"
     assert config["rekuest_hook"] == {"rekuest_url": "http://rekuest-takt:8080/rekuest"}
+    assert config["encryption"] == {"key_path": "/secrets/bank.fernet"}
 
 
 def test_a_setting_this_release_does_not_read_is_refused_by_name(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

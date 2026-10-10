@@ -17,12 +17,22 @@ class ConnectionStatus(str, Enum):
     EXPIRED = "EXPIRED"
     REVOKED = "REVOKED"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 @strawberry.enum(description="Who a connection reaches its accounts through.")
 class Provider(str, Enum):
     ENABLEBANKING = "ENABLEBANKING"
     SCALABLE = "SCALABLE"
+
+
+@strawberry.enum(description="Something a provider kind can do, switched on or off per provider (see `providerKinds`).")
+class ProviderCapability(str, Enum):
+    TRANSACTIONS = "TRANSACTIONS"
+    BALANCES = "BALANCES"
+    HOLDINGS = "HOLDINGS"
+    PRICES = "PRICES"
+    SCHEDULED_SYNC = "SCHEDULED_SYNC"
 
 
 @strawberry.enum(description="What an account holds. A DEPOT's balance is its market valuation; its positions are `holdings`.")
@@ -51,6 +61,7 @@ class BankErrorCode(str, Enum):
     CONNECTION_INACTIVE = "CONNECTION_INACTIVE"
     SYNC_IN_PROGRESS = "SYNC_IN_PROGRESS"
     NOT_CONFIGURED = "NOT_CONFIGURED"
+    LOGIN_REFUSED = "LOGIN_REFUSED"
 
 
 @strawberry.enum(description="A provider's transaction type (Scalable's broker and savings types). OTHER is a type this service does not know yet.")
@@ -83,8 +94,17 @@ class TransactionKind(str, Enum):
 
 @strawberry.enum(description="How a started login finishes.")
 class AuthFinish(str, Enum):
-    REDIRECT = "REDIRECT"  # the provider redirects to redirectUrl with ?code&state; the client calls completeBankLink
-    POLL = "POLL"  # the client calls the complete mutation every `interval` seconds until ACTIVE
+    REDIRECT = "REDIRECT"  # the provider redirects to redirectUrl with ?code&state; the client calls completeAuth with both
+    POLL = "POLL"  # the client calls completeAuth with the state every `interval` seconds until it is not PENDING
+
+
+@strawberry.enum(description="Where a login is.")
+class AuthStatus(str, Enum):
+    PENDING = "PENDING"
+    DONE = "DONE"
+    FAILED = "FAILED"
+    EXPIRED = "EXPIRED"
+    CANCELLED = "CANCELLED"
 
 
 @strawberry.enum(description="Booking status as reported by the bank.")

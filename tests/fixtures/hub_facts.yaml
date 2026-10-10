@@ -129,6 +129,8 @@ instance:
         service: live.arkitekt.lokate
         use: sig
         x: POhFN7iS46yL1yYv7xVZaTwxeHleRhs_ko2rkFSzVbU
+secrets:
+  fernet: /secrets/bank.fernet
 peers:
   rekuest:
     identifier: live.arkitekt.rekuest

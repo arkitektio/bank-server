@@ -20,6 +20,11 @@ EXPECTED = {
         "CREATED",
         "UPDATED"
     ],
+    "@bank/bankprovider": [
+        "CREATED",
+        "UPDATED",
+        "DELETED"
+    ],
     "@bank/bankaccount": [
         "CREATED",
         "UPDATED"

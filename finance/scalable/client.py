@@ -17,6 +17,8 @@ from typing import Any
 import aiohttp
 from django.conf import settings
 
+from finance.models import BankErrorCode
+from finance.providers.errors import ProviderError
 from finance.scalable.dpop import DpopKey
 from finance.scalable.queries import OPERATIONS
 
@@ -25,17 +27,20 @@ logger = logging.getLogger(__name__)
 SCOPE = "offline_access openid email"
 
 
-class ScalableError(Exception):
-    """Scalable refused a request. ``code`` is set when the answer means something specific to a client."""
+class ScalableError(ProviderError):
+    """Scalable refused a request. ``code`` is given when the answer means something specific to a client."""
 
-    def __init__(self, message: str, status: int = 0, code: str | None = None) -> None:
+    def __init__(self, message: str, status: int = 0, code: BankErrorCode | None = None) -> None:
         super().__init__(message)
         self.status = status
-        self.code = code
+        if code is not None:
+            self.explicit_code = code
 
 
 class ReloginRequired(ScalableError):
     """The refresh token is gone (expired, revoked or reused); the user must link again."""
+
+    explicit_code = BankErrorCode.CONSENT_EXPIRED
 
 
 class Unauthorized(ScalableError):
@@ -45,36 +50,28 @@ class Unauthorized(ScalableError):
 class ScalableRateLimited(ScalableError):
     """Scalable throttled us; ``retry_after`` seconds, when it said."""
 
+    explicit_code = BankErrorCode.RATE_LIMITED
+
     def __init__(self, message: str, status: int = 429, retry_after: int | None = None) -> None:
         super().__init__(message, status)
         self.retry_after = retry_after
-
-
-class ScalableNotConfigured(Exception):
-    """This deployment has no ``scalable`` block."""
-
-    def __init__(self) -> None:
-        super().__init__("Scalable Capital is not configured on this server (no `scalable` block in its config).")
 
 
 @dataclass
 class ScalableConfig:
     """What the client needs; built from ``settings.SCALABLE``. Defaults are the CLI's production channel."""
 
-    secret_key_path: str
     issuer: str = "https://secure.scalable.capital"
     audience: str = "https://de.scalable.capital/api-gateway"
     client_id: str = "yBM3BrpRgwSTJZRdJllvtD6jJEmyxWfE"
     graphql_url: str = "https://de.scalable.capital/api/cli/graphql"
     user_agent: str = "arkitekt-bank"
-    daily_sync_limit: int | None = None
     timeout_seconds: float = 30
 
     @classmethod
     def from_settings(cls) -> "ScalableConfig":
-        conf = getattr(settings, "SCALABLE", None)
-        if not conf:
-            raise ScalableNotConfigured()
+        """The deployment's Scalable endpoints (the CLI's production channel unless the config says otherwise)."""
+        conf: dict[str, Any] = getattr(settings, "SCALABLE", None) or {}
         return cls(**conf)
 
 
@@ -89,7 +86,7 @@ class DevicePoll:
 class ScalableClient:
     """One client per operation; open it with ``async with``."""
 
-    def __init__(self, config: ScalableConfig | None = None) -> None:
+    def __init__(self, config: ScalableConfig | None = None) -> None:  # None: the deployment's endpoints
         self.config = config or ScalableConfig.from_settings()
         self._session: aiohttp.ClientSession | None = None
 
@@ -165,9 +162,9 @@ class ScalableClient:
         if error == "slow_down":
             return DevicePoll("slow_down")
         if error == "access_denied":
-            raise ScalableError("The Scalable login was denied.", status, code="MFA_REJECTED")
+            raise ScalableError("The Scalable login was denied.", status, code=BankErrorCode.MFA_REJECTED)
         if error == "expired_token":
-            raise ScalableError("The Scalable login code expired; start a new link.", status, code="CODE_EXPIRED")
+            raise ScalableError("The Scalable login code expired; start a new link.", status, code=BankErrorCode.CODE_EXPIRED)
         raise self._oauth_error("Completing the Scalable login", status, body)
 
     async def refresh(self, key: DpopKey, refresh_token: str, session_id: str | None) -> dict:

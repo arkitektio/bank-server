@@ -5,8 +5,10 @@ and ``fakebank`` — a stand-in for the Enable Banking API that speaks real HTTP
 the RS256 application JWT. Nothing in the service is mocked.
 
 * ``backend_stack`` — brings the stack up once per session; yields its ephemeral ports.
-* ``enablebanking`` — generates an application key pair for the run, registers the public
-  key with fakebank and points ``settings.ENABLEBANKING`` at it.
+* ``providers_endpoints`` / ``application`` — points the provider kinds at the fakes, generates the
+  run's Fernet key and an Enable Banking application key pair registered with fakebank.
+* ``provider_for`` / ``eb_provider`` / ``sc_provider`` / ``make_provider`` — an organization's
+  provider rows, which every link goes through.
 * ``authenticated_context`` / ``other_org_context`` — two tenants (static tokens ``test`` and
   ``othertest``), for scoping tests.
 * ``fakebank`` — a small client for fakebank's ``/_admin`` endpoints.
@@ -160,31 +162,45 @@ def django_db_setup(django_db_setup, django_db_blocker):
         connections.close_all()
 
 
-@pytest.fixture(scope="session", autouse=True)
-def enablebanking(backend_stack, tmp_path_factory):
-    """A fresh application key pair per run, registered with fakebank. Nothing is committed."""
-    from django.conf import settings
+REDIRECTS = ["https://bank.test/callback", "https://other.test/callback"]
 
+
+@dataclass
+class Application:
+    """An Enable Banking application registered with fakebank for the run: its id and private key (PEM text)."""
+
+    app_id: str
+    pem: str
+
+
+def register_application(fakebank_url: str, app_id: str, redirect_urls: list[str] | None = None) -> Application:
+    """Generate a key pair, tell fakebank its public half, and return the application."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    pem = tmp_path_factory.mktemp("eb") / "test-app.pem"
-    pem.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
     public = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
-    _post(backend_stack.fakebank_url + "/_admin/keys", {"kid": "test-app", "public_key": public})
-    settings.ENABLEBANKING = {**settings.ENABLEBANKING, "api_url": backend_stack.fakebank_url, "private_key_path": str(pem)}
-    yield settings.ENABLEBANKING
+    _post(fakebank_url + "/_admin/keys", {"kid": app_id, "public_key": public, "redirect_urls": REDIRECTS if redirect_urls is None else redirect_urls})
+    return Application(app_id, pem)
 
 
 @pytest.fixture(scope="session", autouse=True)
-def scalable(backend_stack, tmp_path_factory):
-    """Point ``settings.SCALABLE`` at fakescalable, with a Fernet key generated for the run."""
+def providers_endpoints(backend_stack, tmp_path_factory):
+    """Point the provider kinds at the fakes of the stack, with a Fernet key generated for the run. Nothing is committed."""
     from cryptography.fernet import Fernet
     from django.conf import settings
 
-    key = tmp_path_factory.mktemp("sc") / "scalable.fernet"
+    key = tmp_path_factory.mktemp("keys") / "bank.fernet"
     key.write_bytes(Fernet.generate_key())
+    settings.ENCRYPTION = {"key_path": str(key)}
+    settings.ENABLEBANKING = {**settings.ENABLEBANKING, "api_url": backend_stack.fakebank_url}
     url = backend_stack.fakescalable_url
-    settings.SCALABLE = {**settings.SCALABLE, "issuer": url, "graphql_url": f"{url}/api/cli/graphql", "secret_key_path": str(key)}
-    yield settings.SCALABLE
+    settings.SCALABLE = {**settings.SCALABLE, "issuer": url, "graphql_url": f"{url}/api/cli/graphql"}
+    yield
+
+
+@pytest.fixture(scope="session")
+def application(backend_stack, providers_endpoints) -> Application:
+    """The run's Enable Banking application (kid ``test-app``), known to fakebank."""
+    return register_application(backend_stack.fakebank_url, "test-app")
 
 
 def _post(url: str, body: dict, method: str = "POST") -> dict:
@@ -350,22 +366,31 @@ def cash(amount: float, when: str, kind: str = "DEPOSIT", *, status: str = "SETT
     }
 
 
-SCALABLE_START = """
-mutation { startScalableLink { state userCode openUrl finish interval expiresAt connection { id status provider linkStep } } }
+#: An auth session, as the external auth flow contract shapes it.
+SESSION = "state status finish openUrl expiresAt redirectUrl interval userCode step errorCode errorMessage result { identifier id label }"
+SCALABLE_START = "mutation Start($provider: ID!) { startLink(input: {provider: $provider}) { %s } }" % SESSION
+SCALABLE_COMPLETE = "mutation Complete($state: String!) { completeAuth(input: {state: $state}) { %s } }" % SESSION
+CONNECTION = """
+query($id: ID!) { bankConnection(id: $id) { id status linkStep lastError validUntil creator { id sub preferredUsername } accounts { id iban currency kind name } } }
 """
-SCALABLE_COMPLETE = """
-mutation Complete($state: String!) { completeScalableLink(state: $state) { id status linkStep lastError creator { id sub preferredUsername } accounts { id kind name } } }
-"""
+
+
+async def connection_of(aexecute, session: dict, context: HttpContext | None = None) -> dict:
+    """The connection a DONE auth session linked, as a client reads it."""
+    assert session["status"] == "DONE", session
+    assert session["result"]["identifier"] == "@bank/connection"
+    return (await aexecute(CONNECTION, {"id": session["result"]["id"]}, context=context)).data["bankConnection"]
 
 
 @pytest.fixture
-def scalable_link(aexecute, fakescalable):
+def scalable_link(aexecute, fakescalable, provider_for):
     """Link this test's Scalable person as tenant A (or ``context``); returns the ACTIVE connection."""
 
     async def _link(context: HttpContext | None = None) -> dict:
-        started = (await aexecute(SCALABLE_START, context=context)).data["startScalableLink"]
+        provider = await provider_for("SCALABLE", context)
+        started = (await aexecute(SCALABLE_START, {"provider": provider}, context=context)).data["startLink"]
         fakescalable.approve(started["userCode"])
-        completed = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]}, context=context)).data["completeScalableLink"]
+        completed = await connection_of(aexecute, (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]}, context=context)).data["completeAuth"], context)
         assert completed["status"] == "ACTIVE", completed
         return completed
 
@@ -406,11 +431,11 @@ def tx(amount: str, day: str, party: str | None = None, *, iban: str | None = No
     return out
 
 
-def _context(token: str, sub: str, org_slug: str) -> HttpContext:
+def _context(token: str, sub: str, org_slug: str, roles: list[str] | None = None) -> HttpContext:
     user, _ = User.objects.get_or_create(sub=sub, iss="static_issuer", defaults={"username": f"static_issuer_{sub}"})
     client, _ = Client.objects.get_or_create(client_id="oinsoins")
     org, _ = Organization.objects.get_or_create(slug=org_slug)
-    membership, _ = Membership.objects.get_or_create(user=user, organization=org)
+    membership, _ = Membership.objects.update_or_create(user=user, organization=org, defaults={"roles": roles or ["editor"]})
     request = UniversalRequest(_extensions={"token": token}, _client=client, _user=user, _organization=org)  # type: ignore[arg-type]
     request.set_membership(membership)  # type: ignore[arg-type]
     return HttpContext(request=request, response=TemporalResponse(), headers={"Authorization": f"Bearer {token}", "User-Agent": "bank-tests", "X-Forwarded-For": "203.0.113.7"}, type="http")
@@ -420,6 +445,12 @@ def _context(token: str, sub: str, org_slug: str) -> HttpContext:
 def authenticated_context(transactional_db) -> HttpContext:
     """Tenant A: the static ``test`` token's identity in ``static_org``."""
     return _context("test", "1", "static_org")
+
+
+@pytest.fixture
+def admin_context(transactional_db) -> HttpContext:
+    """An admin of tenant A (``static_org``): the only role that may set providers up."""
+    return _context("admin", "3", "static_org", roles=["admin"])
 
 
 @pytest.fixture
@@ -447,24 +478,70 @@ def aexecute(authenticated_context):
     return _run
 
 
-LINK = """
-mutation Start($aspsp: String!) { startBankLink(input: {aspspName: $aspsp, country: "AT"}) { state openUrl finish redirectUrl connection { id status } } }
-"""
-COMPLETE = """
-mutation Complete($code: String!, $state: String!) { completeBankLink(input: {code: $code, state: $state}) { id status validUntil accounts { id iban currency } } }
-"""
+def make_provider(organization: Organization, kind: str, application: Application | None = None, **fields) -> "models.BankProvider":  # noqa: ANN003, F821
+    """A provider row as an admin's mutation would leave it (``tests/test_providers.py`` covers the mutations themselves)."""
+    from finance import crypto, models
+    from finance.providers.enablebanking import read_key
+    from finance.providers.registry import kind_of
+
+    backend = kind_of(kind)
+    values: dict = {
+        "name": fields.pop("name", backend.label),
+        "capabilities": sorted(c.value for c in backend.capabilities),
+        "daily_sync_limit": backend.default_daily_sync_limit,
+    }
+    if kind == "ENABLEBANKING":
+        assert application is not None
+        values["settings"] = {"app_id": application.app_id, "redirect_urls": REDIRECTS, "consent_days": 90, "psu_type": "personal", "key_fingerprint": read_key(application.pem)[1]}
+        values["secret"] = crypto.encrypt(application.pem)
+    return models.BankProvider.objects.create(organization=organization, kind=kind, **{**values, **fields})
 
 
 @pytest.fixture
-def link(aexecute, fakebank):
+def provider_for(authenticated_context, application):
+    """The id of the provider of a kind in tenant A's (or ``context``'s) organization, set up on first use."""
+    from channels.db import database_sync_to_async
+
+    from finance import models
+
+    def _get(kind: str, context: HttpContext | None) -> str:
+        organization = (context or authenticated_context).request.organization
+        row = models.BankProvider.objects.filter(organization=organization, kind=kind).order_by("id").first()
+        return str((row or make_provider(organization, kind, application)).id)
+
+    async def _provider(kind: str = "ENABLEBANKING", context: HttpContext | None = None) -> str:
+        return await database_sync_to_async(_get)(kind, context)
+
+    return _provider
+
+
+@pytest.fixture
+def eb_provider(authenticated_context, application) -> str:
+    """Tenant A's Enable Banking provider (its id), for tests that start links themselves."""
+    return str(make_provider(authenticated_context.request.organization, "ENABLEBANKING", application).id)
+
+
+@pytest.fixture
+def sc_provider(authenticated_context) -> str:
+    """Tenant A's Scalable provider (its id)."""
+    return str(make_provider(authenticated_context.request.organization, "SCALABLE").id)
+
+
+LINK = 'mutation Start($provider: ID!, $aspsp: String!) { startLink(input: {provider: $provider, institution: $aspsp, country: "AT"}) { %s } }' % SESSION
+COMPLETE = "mutation Complete($code: String, $state: String!, $error: String, $description: String) { completeAuth(input: {code: $code, state: $state, error: $error, errorDescription: $description}) { %s } }" % SESSION
+
+
+@pytest.fixture
+def link(aexecute, fakebank, provider_for):
     """Link this test's fake bank as tenant A (or ``context``); returns the completed connection."""
 
     async def _link(context: HttpContext | None = None) -> dict:
-        started = await aexecute(LINK, {"aspsp": fakebank.aspsp}, context=context)
-        state = started.data["startBankLink"]["state"]
+        provider = await provider_for("ENABLEBANKING", context)
+        started = await aexecute(LINK, {"provider": provider, "aspsp": fakebank.aspsp}, context=context)
+        state = started.data["startLink"]["state"]
         code = fakebank.approve(state)
         completed = await aexecute(COMPLETE, {"code": code, "state": state}, context=context)
-        return completed.data["completeBankLink"]
+        return await connection_of(aexecute, completed.data["completeAuth"], context)
 
     return _link
 

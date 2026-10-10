@@ -24,6 +24,8 @@ AUTHENTIKATE = {
     "allow_static_tokens_in_production": True,
     "static_tokens": {
         "test": {"sub": "1", "roles": ["editor"]},
+        # An admin of the same organization (roles come from the membership, see conftest), for provider setup.
+        "admin": {"sub": "3", "roles": ["admin"]},
         # Another member of the same organization, for creator-only checks.
         "colleague": {"sub": "2", "roles": ["editor"]},
         # A user in a different organization, for cross-tenant scoping tests.
@@ -31,29 +33,16 @@ AUTHENTIKATE = {
     },
 }
 
-# Enable Banking points at the fake bank of the test stack; `conftest.enablebanking` fills in
-# its URL and a key pair generated for the run. Nothing here is a real credential.
-ENABLEBANKING = {
-    "app_id": "test-app",
-    "private_key_path": "/nonexistent/set-by-conftest.pem",
-    "api_url": "http://localhost:0",
-    "redirect_urls": ["https://bank.test/callback", "https://other.test/callback"],
-    "consent_days": 90,
-    "psu_type": "personal",
-    "timeout_seconds": 10,
-    "daily_sync_limit": 4,
-}
-
-# Scalable points at the fake Scalable of the test stack; `conftest.scalable` fills in its URLs
-# and a Fernet key generated for the run.
+# The fake bank and the fake Scalable of the test stack, and a Fernet key generated for the run:
+# `conftest.providers_endpoints` fills all three in. Nothing here is a real credential.
+ENCRYPTION = {"key_path": "/nonexistent/set-by-conftest.fernet"}
+ENABLEBANKING = {"api_url": "http://localhost:0", "timeout_seconds": 10}
 SCALABLE = {
-    "secret_key_path": "/nonexistent/set-by-conftest.fernet",
     "issuer": "http://localhost:0",
     "audience": "https://de.scalable.capital/api-gateway",
     "client_id": "test-cli-client",
     "graphql_url": "http://localhost:0/api/cli/graphql",
     "user_agent": "bank-tests",
-    "daily_sync_limit": None,
     "timeout_seconds": 10,
 }
 

@@ -20,8 +20,7 @@ from channels.db import database_sync_to_async
 from django.db.models import Q
 from django.utils import timezone
 
-from finance import models
-from finance.scalable import crypto
+from finance import crypto, models
 from finance.scalable.client import ReloginRequired, ScalableClient, ScalableError
 from finance.scalable.dpop import DpopKey
 

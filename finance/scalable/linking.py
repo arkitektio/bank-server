@@ -13,13 +13,13 @@
    * then discover the broker portfolios and overnight savings accounts and activate.
 
    A step holds the connection's ``token_lease_until``, so two concurrent calls never both
-   redeem the device code. Only a state from the caller's organization is accepted.
+   redeem the device code. Whose login a state is, is checked in :mod:`finance.auth_sessions`.
 
 Accounts are keyed by ``scalable:<person>:...``, so relinking an expired login re-attaches the
 same accounts with their history.
 """
 
-import uuid
+import secrets
 from datetime import timedelta
 
 from channels.db import database_sync_to_async
@@ -28,29 +28,29 @@ from django.utils import timezone
 
 from finance import models
 from finance.accounts import attach_syncer
-from finance.linking import PENDING_TTL, LinkError
+from finance.providers.errors import PENDING_TTL
 from finance.taxonomy import seed_base_categories
 from finance.scalable import tokens
-from finance.scalable.client import ScalableClient, ScalableConfig, ScalableError
+from finance.scalable.client import ScalableClient, ScalableError
 from finance.scalable.dpop import DpopKey
 
 INSTITUTION = "Scalable Capital"
 
 
-async def start_scalable_link(organization, creator) -> tuple[models.BankConnection, dict]:  # noqa: ANN001 - authentikate models
-    """Start a device login; returns the PENDING connection and Scalable's device-code answer."""
-    config = ScalableConfig.from_settings()
+async def start_scalable_link(provider: models.BankProvider, organization, creator) -> models.BankConnection:  # noqa: ANN001 - authentikate models
+    """Start a device login; returns the PENDING connection (its ``raw`` holds what the user opens)."""
     key = DpopKey.generate()
-    async with ScalableClient(config) as client:
+    async with ScalableClient() as client:
         device = await client.device_code(key)
     ttl = min(PENDING_TTL, timedelta(seconds=int(device.get("expires_in") or 900)))
-    connection = await models.BankConnection.objects.acreate(
+    return await models.BankConnection.objects.acreate(
         organization=organization,
         creator=creator,
+        bank_provider=provider,
         provider=models.Provider.SCALABLE,
         aspsp_name=INSTITUTION,
         aspsp_country="DE",
-        state=uuid.uuid4().hex,
+        state=secrets.token_urlsafe(32),
         redirect_url="",
         pending_expires_at=timezone.now() + ttl,
         secret=tokens.seal({"dpop": key.to_pem(), "device_code": device["device_code"]}),
@@ -60,33 +60,27 @@ async def start_scalable_link(organization, creator) -> tuple[models.BankConnect
         # Non-secret, what a resumed session shows again (see finance.auth_sessions).
         raw={"verification_uri": device.get("verification_uri"), "verification_uri_complete": device.get("verification_uri_complete"), "user_code": device.get("user_code")},
     )
-    return connection, device
 
 
-def _claim(organization_id: int, state: str) -> tuple[models.BankConnection, bool]:
-    """The organization's Scalable link for ``state``, and whether this call may advance it."""
-    now = timezone.now()
-    connection = models.BankConnection.objects.filter(organization_id=organization_id, state=state, provider=models.Provider.SCALABLE).first()
-    if connection is None:
-        raise LinkError("No Scalable link with this state in your organization.")
-    if connection.status == models.ConnectionStatus.ACTIVE:
-        return connection, False
+def _claim(connection_id: int) -> tuple[models.BankConnection, bool]:
+    """The connection as it is now, and whether this call may advance it."""
+    connection = models.BankConnection.objects.get(id=connection_id)
     if connection.status != models.ConnectionStatus.PENDING:
-        # Repeat why it ended (a denied second factor stays MFA_REJECTED on every later call).
-        raise LinkError(f"This Scalable link is {connection.status.lower()}: {connection.last_error or 'start a new one'}.", code=connection.last_error_code or models.BankErrorCode.INVALID_STATE)
-    if connection.pending_expires_at < now:
-        _fail(connection.id, "The login was not completed in time.", models.BankErrorCode.CODE_EXPIRED)
-        raise LinkError("This Scalable link expired; start a new one.", code=models.BankErrorCode.CODE_EXPIRED)
+        return connection, False
+    # The code only matters until it is approved: a login waiting for its second factor lives on.
+    if connection.link_step == models.LinkStep.DEVICE and connection.pending_expires_at < timezone.now():
+        return _fail(connection.id, "The login was not completed in time.", models.BankErrorCode.CODE_EXPIRED), False
     claimed = tokens._claim(connection.id)
     if claimed:
         connection.refresh_from_db()
     return connection, claimed
 
 
-def _fail(connection_id: int, message: str, code: str | None) -> None:
+def _fail(connection_id: int, message: str, code: str | None) -> models.BankConnection:
     models.BankConnection.objects.filter(id=connection_id).update(
         status=models.ConnectionStatus.FAILED, last_error=message[:2000], last_error_code=code, secret=None, token_lease_until=None
     )
+    return models.BankConnection.objects.get(id=connection_id)
 
 
 def _activate(connection_id: int, secret: dict, portfolios: list[str], savings: list[dict]) -> models.BankConnection:
@@ -174,20 +168,22 @@ async def _step(connection: models.BankConnection, client: ScalableClient) -> mo
     return await database_sync_to_async(_activate)(connection.id, secret, portfolios, savings)
 
 
-async def complete_scalable_link(organization_id: int, state: str) -> models.BankConnection:
-    """Advance the link one step; returns the connection (PENDING until the user approved everything)."""
-    connection, claimed = await database_sync_to_async(_claim)(organization_id, state)
+async def complete_scalable_link(connection: models.BankConnection) -> models.BankConnection:
+    """Advance the link one step; returns the connection (PENDING until the user approved everything).
+
+    A refusal from Scalable ends the login (FAILED, returned); a throttled or failing Scalable
+    leaves it PENDING and raises.
+    """
+    connection, claimed = await database_sync_to_async(_claim)(connection.id)
     if not claimed:
         return connection
     try:
         async with ScalableClient() as client:
             connection = await _step(connection, client)
-    except ScalableError as error:  # a definite answer from Scalable: this login is over
-        from finance.errors import code_for
-
-        code = code_for(error)
-        await database_sync_to_async(_fail)(connection.id, str(error), code)
-        raise LinkError(str(error), code=code) from error
+    except ScalableError as error:
+        if error.code in (models.BankErrorCode.BANK_UNAVAILABLE, models.BankErrorCode.RATE_LIMITED):
+            raise  # no answer about the login itself: it goes on with the next call
+        return await database_sync_to_async(_fail)(connection.id, str(error), error.code)
     finally:
         await database_sync_to_async(tokens._release)(connection.id)
     return await models.BankConnection.objects.aget(id=connection.id)

@@ -161,22 +161,30 @@ authentikate:
   static_tokens: {}
 ```
 
-### `enablebanking` — Enable Banking application (optional)
+### `encryption` — the key provider credentials are encrypted with
 
-The PSD2 aggregator the service reaches banks through. One application per deployment. Without
-this block the service still serves stats, categories and budgets, but `bankInstitutions`,
-`startBankLink`, `completeBankLink` and syncs answer `NOT_CONFIGURED`.
+Providers are not configured here: an organization's admin creates them in the client
+(`createEnableBankingProvider` with the application id and its `.pem`, `createScalableProvider`).
+What they hold — an Enable Banking application's private key, a Scalable login's tokens — is
+stored Fernet-encrypted with this key. Without the block no Enable Banking provider can be set up
+and Scalable cannot be linked (`NOT_CONFIGURED`); stats, categories and budgets still work.
 
 | Key | Env var | Type | Default | Description |
 |---|---|---|---|---|
-| `app_id` | `ENABLEBANKING__APP_ID` | str | **required** | The application id; also the `kid` of every JWT the service signs. |
-| `private_key_path` 🔒 | `ENABLEBANKING__PRIVATE_KEY_PATH` | str | **required** | Path of the application's RS256 private key (`<app-id>.pem`). Mount it read-only; never commit it. |
+| `key_path` 🔒 | `ENCRYPTION__KEY_PATH` | str | **required** | Path of a Fernet key (`Fernet.generate_key()`). Mount it read-only; never commit it. Losing it means setting every provider up and linking again. |
+
+A hub's installer mounts the key and renders this block (the contract's `secrets: [fernet]`).
+
+### `enablebanking` — where Enable Banking is reached (optional)
+
+Only the endpoint is the deployment's, so that no organization can point the server elsewhere.
+Application id, private key, redirect URLs, consent days and the daily sync limit belong to the
+provider an admin creates.
+
+| Key | Env var | Type | Default | Description |
+|---|---|---|---|---|
 | `api_url` | `ENABLEBANKING__API_URL` | str | `https://api.enablebanking.com` | Base URL of the API. |
-| `redirect_urls` | — (use YAML) | list[str] | `["https://johannesroos.de/callback"]` | Redirect URLs registered for the application. A client may pick one per link (the first is the default); anything else is refused. |
-| `consent_days` | `ENABLEBANKING__CONSENT_DAYS` | int | `90` | How long a new consent is requested for (banks may cap it). |
-| `psu_type` | `ENABLEBANKING__PSU_TYPE` | str | `personal` | `personal` or `business`. |
 | `timeout_seconds` | `ENABLEBANKING__TIMEOUT_SECONDS` | float | `60` | Timeout of one API request. |
-| `daily_sync_limit` | `ENABLEBANKING__DAILY_SYNC_LIMIT` | int | `4` | Syncs per account per UTC day (PSD2); clients see it as `syncsRemainingToday`. |
 
 ### `sync` — how a sync runs
 
@@ -217,12 +225,13 @@ of every instance). Konstruktor mints the key and enrolls its public half with t
 | `trust.jwks_uri` | `INSTANCE__TRUST__JWKS_URI` | str? | `null` | The coord's hub-keys URL (fakts `self.hub_keys_url`). |
 | `trust.jwks` | — | object? | `null` | Or the bundle inline, for a hub not enrolled yet. |
 
-### `scalable` — Scalable Capital (official CLI login)
+### `scalable` — where Scalable Capital is reached (optional)
+
+Whether an organization uses Scalable is a provider its admin creates; logins are encrypted with
+`encryption.key_path`.
 
 | Key | Env var | Type | Default | Description |
 |---|---|---|---|---|
-| `secret_key_path` | `SCALABLE__SECRET_KEY_PATH` | str | — | Fernet key encrypting stored Scalable credentials. Secret — mount it. |
-| `daily_sync_limit` | `SCALABLE__DAILY_SYNC_LIMIT` | int? | `null` | Syncs per account per UTC day; null is unlimited. |
 | `issuer`, `audience`, `client_id`, `graphql_url` | `SCALABLE__…` | str | CLI prod | Scalable's OAuth issuer and CLI API. |
 | `user_agent`, `timeout_seconds` | `SCALABLE__…` | | | Sent User-Agent; per-request timeout. |
 
@@ -345,9 +354,8 @@ authentikate:
       kid: lok-key-1
       public_key: "ssh-rsa AAAA..."
   static_tokens: {}
-enablebanking:
-  app_id: "REPLACE_ME"
-  private_key_path: /secrets/enablebanking.pem
+encryption:
+  key_path: /secrets/bank.fernet
 ```
 
 Validate it with `python manage.py validate_settings`.

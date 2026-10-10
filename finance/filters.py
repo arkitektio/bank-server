@@ -43,6 +43,31 @@ class BankConnectionFilter:
         """Only connections in this status."""
         return Q(**{f"{prefix}status": value.value})
 
+    @strawberry_django.filter_field
+    def provider(self, value: strawberry.ID, prefix: str) -> Q:
+        """Only connections made through this provider."""
+        return Q(**{f"{prefix}bank_provider_id": value})
+
+
+@strawberry_django.filter_type(models.BankProvider)
+class BankProviderFilter:
+    """Filtering options for providers."""
+
+    @strawberry_django.filter_field
+    def ids(self, value: list[strawberry.ID], prefix: str) -> Q:
+        """Only these providers."""
+        return _ids(prefix, "id", value)
+
+    @strawberry_django.filter_field
+    def kind(self, value: enums.Provider, prefix: str) -> Q:
+        """Only providers of this kind."""
+        return Q(**{f"{prefix}kind": value.value})
+
+    @strawberry_django.filter_field
+    def enabled(self, value: bool, prefix: str) -> Q:
+        """Only enabled (or only disabled) providers."""
+        return Q(**{f"{prefix}enabled": value})
+
 
 @strawberry_django.filter_type(models.BankAccount)
 class BankAccountFilter:

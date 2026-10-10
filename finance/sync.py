@@ -37,16 +37,17 @@ from decimal import Decimal
 from channels.db import database_sync_to_async
 from django.conf import settings
 from django.db import transaction as db_transaction
-from django.db.models import Max, Min, Q
+from django.db.models import Max, Q
 from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
 
 from finance import models
-from finance.enablebanking.client import ConsentExpired, EnableBankingClient
 from embeddings.models import EMBEDDING_FIELDS
 from finance.errors import SyncBudgetExhausted
 from finance.semantic import auto_assign, embed_rows
-from finance.scalable.client import ScalableClient
+from finance.providers.base import DATA_CAPABILITIES, PsuHeaders
+from finance.providers.errors import ConsentGone, NotConfigured
+from finance.providers.registry import usable
 
 logger = logging.getLogger(__name__)
 
@@ -164,8 +165,9 @@ def fetch_since(syncer: models.AccountSyncer, overlap_days: int) -> date | None:
 
 def daily_limit(syncer: models.AccountSyncer) -> int | None:
     """Syncs per UTC day the syncer's provider allows (None: unlimited)."""
-    conf = settings.SCALABLE if syncer.backend == models.Provider.SCALABLE else settings.ENABLEBANKING
-    return (conf or {}).get("daily_sync_limit")
+    connection = syncer.connection
+    provider = connection.bank_provider if connection else None
+    return provider.daily_sync_limit if provider else None
 
 
 def _tomorrow(now: datetime) -> datetime:
@@ -258,13 +260,17 @@ def categorize_rows(organization_id: int, touched_ids: list[int]) -> int:
     return categorized
 
 
-def persist(syncer_id: int, raw_transactions: list[dict], raw_balances: list[dict], since: date | None = None) -> SyncResult:
-    """Write one Enable Banking fetch (of everything from ``since`` on) in a single transaction."""
+def persist(syncer_id: int, raw_transactions: list[dict] | None, raw_balances: list[dict], since: date | None = None) -> SyncResult:
+    """Write one Enable Banking fetch (of everything from ``since`` on) in a single transaction.
+
+    ``raw_transactions`` is None when transactions were not fetched (the provider has them
+    switched off): the stored ones, pending included, are then left as they are.
+    """
     from finance.transfers import detect_transfers
 
     syncer = models.AccountSyncer.objects.get(id=syncer_id)
     result = SyncResult(account_id=syncer.account_id)
-    rows = [normalize(tx) for tx in raw_transactions]
+    rows = [normalize(tx) for tx in raw_transactions or []]
     booked = [row for row in rows if row["status"] != models.TransactionStatus.PENDING]
     pending = [row for row in rows if row["status"] == models.TransactionStatus.PENDING]
     now = dj_timezone.now()
@@ -277,7 +283,8 @@ def persist(syncer_id: int, raw_transactions: list[dict], raw_balances: list[dic
         stale_pending = syncer.transactions.filter(status=models.TransactionStatus.PENDING)
         if since is not None:
             stale_pending = stale_pending.annotate(day=Coalesce("transaction_date", "value_date", "booking_date")).filter(Q(day__gte=since) | Q(day__isnull=True))
-        result.pending_replaced = stale_pending.delete()[0]
+        if raw_transactions is not None:
+            result.pending_replaced = stale_pending.delete()[0]
         pending_rows = [
             models.Transaction(account=account, syncer=syncer, fingerprint=f"pdng:{fp}", **row) for fp, row in zip(fingerprint_all(pending), pending)
         ]
@@ -363,70 +370,11 @@ def detect_recurring(account_id: int) -> None:
 
 
 def _load(syncer_id: int) -> tuple[models.AccountSyncer, date | None]:
-    syncer = models.AccountSyncer.objects.select_related("connection", "account").get(id=syncer_id)
+    syncer = models.AccountSyncer.objects.select_related("connection__bank_provider", "account").get(id=syncer_id)
     return syncer, fetch_since(syncer, sync_settings()["overlap_days"])
 
 
-async def _fetch_enablebanking(syncer: models.AccountSyncer, since: date | None, psu_headers: dict[str, str] | None, client: EnableBankingClient | None) -> SyncResult:
-    """Fetch an Enable Banking account and store it (the caller holds the lease and handles failures)."""
-
-    async def fetch(eb: EnableBankingClient) -> tuple[list[dict], list[dict]]:
-        txs = await eb.transactions(syncer.remote_id, since, psu_headers=psu_headers)
-        balances = await eb.balances(syncer.remote_id, psu_headers=psu_headers)
-        return txs, balances
-
-    if client is not None:
-        txs, balances = await fetch(client)
-    else:
-        async with EnableBankingClient() as eb:
-            txs, balances = await fetch(eb)
-    result = await database_sync_to_async(persist)(syncer.id, txs, balances, since)
-    logger.info("Synced account %s: %s new, %s updated, %s pending", syncer.account_id, result.created, result.updated, result.pending_replaced)
-    return result
-
-
-async def _fetch_scalable(syncer: models.AccountSyncer, since: date | None, psu_headers: dict[str, str] | None, client: EnableBankingClient | None) -> SyncResult:
-    """Fetch a Scalable pot and store it (the caller holds the lease and handles failures)."""
-    from finance.scalable import sync as scalable_sync
-    from finance.scalable.client import Unauthorized
-    from finance.scalable.tokens import refreshed_session, session_for
-
-    # An order can stay pending for weeks: page back far enough to see every pending row again.
-    oldest_pending = await syncer.transactions.filter(status=models.TransactionStatus.PENDING).aaggregate(oldest=Min("booking_date"))
-    if since and oldest_pending["oldest"]:
-        since = min(since, oldest_pending["oldest"])
-    async with ScalableClient() as sc:
-        session = await session_for(syncer.connection_id, sc)
-        try:
-            fetched = await scalable_sync.fetch(syncer, session, sc, since)
-        except Unauthorized:
-            # As the CLI does: refresh once and retry. Only a failed refresh (invalid_grant) means relogin.
-            session = await refreshed_session(syncer.connection_id, sc, session)
-            fetched = await scalable_sync.fetch(syncer, session, sc, since)
-    result = SyncResult(account_id=syncer.account_id)
-    await database_sync_to_async(scalable_sync.persist)(syncer.id, fetched, result)
-    if fetched.holdings:
-        # The depot's last month of prices from Scalable, in this same request; never fails the sync.
-        from finance.prices import service as prices
-
-        try:
-            isins = sorted({item["isin"] for item in fetched.holdings if item.get("isin")})
-            today = dj_timezone.now().date()
-            await prices.refresh(syncer.organization_id, isins, today - timedelta(days=31), today, only=[models.PriceSource.SCALABLE])
-        except Exception:
-            logger.warning("Refreshing prices after the depot sync of account %s failed.", syncer.account_id, exc_info=True)
-    logger.info("Synced Scalable account %s: %s new, %s updated, %s holdings", syncer.account_id, result.created, result.updated, result.holdings)
-    return result
-
-
-# How each backend fetches and stores a syncer. A new provider is one more entry.
-BACKENDS = {
-    models.Provider.ENABLEBANKING: _fetch_enablebanking,
-    models.Provider.SCALABLE: _fetch_scalable,
-}
-
-
-async def sync_syncer(syncer_id: int, psu_headers: dict[str, str] | None = None, client: EnableBankingClient | None = None) -> SyncResult:
+async def sync_syncer(syncer_id: int, psu_headers: PsuHeaders | None = None) -> SyncResult:
     """Fetch one syncer from its provider and store it, inside this request.
 
     Raises :class:`AlreadySyncing` if another request holds the syncer and
@@ -443,10 +391,13 @@ async def sync_syncer(syncer_id: int, psu_headers: dict[str, str] | None = None,
             status = connection.status if connection else "missing"
             raise ConnectionInactive(f"The account's bank connection is {status.lower()}; link the bank again to sync it.")
         if connection.valid_until and connection.valid_until <= dj_timezone.now():
-            raise ConsentExpired(0, f"The consent ran out at {connection.valid_until.isoformat()}.", "sync")
+            raise ConsentGone(f"The consent ran out at {connection.valid_until.isoformat()}.")
+        backend = usable(connection.bank_provider, "This account's connection")
+        if not any(backend.has(capability) for capability in DATA_CAPABILITIES):
+            raise NotConfigured(f"The provider {backend.provider.name!r} has transactions, balances and holdings switched off: there is nothing to sync.")
         await database_sync_to_async(spend)(syncer_id)
-        return await BACKENDS[syncer.backend](syncer, since, psu_headers, client)
-    except (ConnectionInactive, SyncBudgetExhausted):
+        return await backend.sync(syncer, since, psu_headers)
+    except (ConnectionInactive, SyncBudgetExhausted, NotConfigured):
         raise  # nothing reached the provider: the syncer's last sync outcome stands
     except Exception as error:
         await database_sync_to_async(record_failure)(syncer_id, error)
@@ -466,7 +417,7 @@ def _syncers_to_run(account_id: int) -> list[int]:
     raise ConnectionInactive("The account has no bank connection (it is fed by imports only); link the bank to sync it.")
 
 
-async def sync_account(account_id: int, psu_headers: dict[str, str] | None = None, client: EnableBankingClient | None = None) -> SyncResult:
+async def sync_account(account_id: int, psu_headers: PsuHeaders | None = None) -> SyncResult:
     """Sync every live syncer of the account (see :func:`sync_syncer`); the first failure raises.
 
     An account whose syncers are all inactive fails with :class:`ConnectionInactive` — as does one
@@ -474,7 +425,7 @@ async def sync_account(account_id: int, psu_headers: dict[str, str] | None = Non
     """
     total = SyncResult(account_id=account_id)
     for syncer_id in await database_sync_to_async(_syncers_to_run)(account_id):
-        result = await sync_syncer(syncer_id, psu_headers=psu_headers, client=client)
+        result = await sync_syncer(syncer_id, psu_headers=psu_headers)
         for name in ("created", "updated", "pending_replaced", "balances", "categorized", "holdings"):
             setattr(total, name, getattr(total, name) + getattr(result, name))
     await database_sync_to_async(after_sync)(total)

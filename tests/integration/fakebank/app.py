@@ -10,7 +10,7 @@ the real API does. Tests drive it through ``/_admin``:
 * ``PUT  /_admin/accounts/{ident}`` replace one account's transactions / balances / ``rate_limited``
 * ``POST /_admin/approve``         the user approves a consent: returns the redirect ``code``
 * ``POST /_admin/sessions/{id}/expire``  the consent runs out at the bank
-* ``POST /_admin/hold`` / ``/_admin/release``  park transaction requests until released
+* ``POST /_admin/hold`` / ``/_admin/release``  park transaction and session requests until released
 * ``GET  /_admin/held``            how many requests are parked right now
 * ``GET  /_admin/log``             every API request with its PSU headers
 
@@ -28,6 +28,7 @@ PAGE_SIZE = 3
 
 STATE: dict = {
     "keys": {},  # kid -> public key PEM
+    "redirects": {},  # kid -> redirect URLs registered for the application
     "scenarios": {},  # aspsp name -> [account ident]
     "accounts": {},  # ident -> {"account": {...}, "transactions": [...], "balances": [...]}
     "auths": {},  # state -> {aspsp, redirect_url, valid_until}
@@ -59,12 +60,14 @@ async def verify_jwt(request: web.Request, handler):  # noqa: ANN001, ANN201
         if key is None:
             return _error(401, "UNAUTHORIZED", f"unknown application {kid!r}")
         jwt.decode(token, key, algorithms=["RS256"], audience="api.enablebanking.com", issuer="enablebanking.com")
+        request["kid"] = kid
     except jwt.PyJWTError as error:
         return _error(401, "UNAUTHORIZED", f"invalid JWT: {error}")
     STATE["log"].append(
         {
             "method": request.method,
             "path": request.path,
+            "kid": kid,
             "query": dict(request.query),
             "psu_ip": request.headers.get("Psu-Ip-Address"),
             "psu_user_agent": request.headers.get("Psu-User-Agent"),
@@ -74,6 +77,13 @@ async def verify_jwt(request: web.Request, handler):  # noqa: ANN001, ANN201
 
 
 # --- the API ----------------------------------------------------------------------------------
+
+
+async def application(request: web.Request) -> web.Response:
+    kid = request["kid"]
+    return web.json_response(
+        {"name": f"Fake application {kid}", "description": "", "kid": kid, "environment": "SANDBOX", "redirect_urls": STATE["redirects"].get(kid, []), "active": True, "countries": ["AT"], "services": ["AIS"]}
+    )
 
 
 async def aspsps(request: web.Request) -> web.Response:
@@ -93,6 +103,12 @@ async def auth(request: web.Request) -> web.Response:
 
 async def create_session(request: web.Request) -> web.Response:
     body = await request.json()
+    if not STATE["hold"].is_set():
+        STATE["held"] += 1
+        try:
+            await STATE["hold"].wait()
+        finally:
+            STATE["held"] -= 1
     state = STATE["codes"].pop(body.get("code"), None)
     if state is None:
         return _error(422, "INVALID_CODE", "unknown or already used code")
@@ -177,6 +193,7 @@ async def balances(request: web.Request) -> web.Response:
 async def admin_keys(request: web.Request) -> web.Response:
     body = await request.json()
     STATE["keys"][body["kid"]] = body["public_key"]
+    STATE["redirects"][body["kid"]] = body.get("redirect_urls", [])
     return web.json_response({"ok": True})
 
 
@@ -240,6 +257,7 @@ def build() -> web.Application:
     app = web.Application(middlewares=[verify_jwt])
     app.add_routes(
         [
+            web.get("/application", application),
             web.get("/aspsps", aspsps),
             web.post("/auth", auth),
             web.post("/sessions", create_session),

@@ -178,9 +178,11 @@ CACHES = {
 
 CACHE_TTL_DEFAULT = 60 * 15
 
-# Enable Banking credentials (None when not configured) and the sync sweep; see configuration.py.
-ENABLEBANKING = conf.enablebanking.model_dump() if conf.enablebanking else None
-SCALABLE = conf.scalable.model_dump() if conf.scalable else None
+# Where the provider kinds are reached, and the key their credentials are encrypted with (None
+# when not configured); see configuration.py. The providers themselves are rows (finance.models.BankProvider).
+ENCRYPTION = conf.encryption.model_dump() if conf.encryption else None
+ENABLEBANKING = conf.enablebanking.model_dump()
+SCALABLE = conf.scalable.model_dump()
 BANK_SYNC = conf.sync.model_dump()
 BANK_IMPORTS = conf.imports.model_dump()
 # The vendored datalayer reads only this; empty without a `datalayer` block (uploads then answer NOT_CONFIGURED).

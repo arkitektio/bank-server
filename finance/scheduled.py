@@ -30,12 +30,15 @@ logger = logging.getLogger(__name__)
 
 
 def _due_syncers(organization: str) -> list[int]:
-    """The organization's syncers with an active, unexpired connection whose budget allows a scheduled sync right now."""
+    """The organization's syncers with an active, unexpired connection (of a provider that syncs unattended) whose budget allows a scheduled sync right now."""
     now = timezone.now()
     reserve = settings.BANK_SYNC.get("scheduled_reserve", 1)
     candidates = (
         models.AccountSyncer.objects.filter(organization__slug=organization, connection__status=models.ConnectionStatus.ACTIVE)
         .filter(Q(connection__valid_until__isnull=True) | Q(connection__valid_until__gt=now))
+        # Only what an admin let run unattended: an enabled provider with SCHEDULED_SYNC on.
+        .filter(connection__bank_provider__enabled=True, connection__bank_provider__capabilities__contains=[models.ProviderCapability.SCHEDULED_SYNC.value])
+        .select_related("connection__bank_provider")
         .order_by("id")
     )
     due = []

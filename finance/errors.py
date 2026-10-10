@@ -23,30 +23,22 @@ class SyncBudgetExhausted(Exception):
 
 def code_for(error: BaseException) -> BankErrorCode | None:
     """The code of a known failure; None for anything else (a bug, not a provider answer)."""
-    from finance.enablebanking.client import ConsentExpired, EnableBankingError, NotConfigured, RateLimited
-    from finance.linking import LinkError
-    from finance.scalable.client import ReloginRequired, ScalableError, ScalableNotConfigured, ScalableRateLimited
     from finance.geocoding import GeocodingDisabled, GeocodingError
     from finance.prices.sources import PriceError
+    from finance.providers.errors import LinkError, ProviderError
     from finance.sync import AlreadySyncing, ConnectionInactive
 
     if isinstance(error, LinkError):
         return error.code
+    if isinstance(error, ProviderError):
+        return error.code
+    if isinstance(error, SyncBudgetExhausted):
+        return BankErrorCode.RATE_LIMITED
     if isinstance(error, GeocodingDisabled):
         return BankErrorCode.NOT_CONFIGURED
     if isinstance(error, PriceError):
         return BankErrorCode.BANK_UNAVAILABLE if error.status == 0 or error.status >= 500 else BankErrorCode.BANK_ERROR
     if isinstance(error, GeocodingError):
-        return BankErrorCode.BANK_UNAVAILABLE if error.status == 0 or error.status >= 500 else BankErrorCode.BANK_ERROR
-    if isinstance(error, (ConsentExpired, ReloginRequired)):
-        return BankErrorCode.CONSENT_EXPIRED
-    if isinstance(error, (RateLimited, ScalableRateLimited, SyncBudgetExhausted)):
-        return BankErrorCode.RATE_LIMITED
-    if isinstance(error, (NotConfigured, ScalableNotConfigured)):
-        return BankErrorCode.NOT_CONFIGURED
-    if isinstance(error, ScalableError) and error.code is not None:
-        return error.code
-    if isinstance(error, (EnableBankingError, ScalableError)):
         return BankErrorCode.BANK_UNAVAILABLE if error.status == 0 or error.status >= 500 else BankErrorCode.BANK_ERROR
     if isinstance(error, (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError)):
         return BankErrorCode.BANK_UNAVAILABLE

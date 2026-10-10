@@ -36,6 +36,15 @@ HOSTS = Hosts(
             ],
         ),
         Structure(
+            identifier="@bank/bankprovider",
+            label="Bank Provider",
+            description="A provider an organization set up (an Enable Banking application, Scalable Capital), through which banks are linked.",
+            descriptors=[
+                Descriptor(key="@bank/provider", type="STRING", description="The kind of provider"),
+                Descriptor(key="@bank/enabled", type="BOOL", description="Whether it starts links and syncs"),
+            ],
+        ),
+        Structure(
             identifier="@bank/bankaccount",
             label="Bank Account",
             description="A bank account, with its history across relinks.",
@@ -99,6 +108,12 @@ HOSTS = Hosts(
             description="A bank link was started, completed, expired or revoked.",
         ),
         Signal(
+            identifier="@bank/bankprovider",
+            kinds=["CREATED", "UPDATED", "DELETED"],
+            descriptors=["@bank/provider", "@bank/enabled"],
+            description="A provider was set up, changed (enabled, its capabilities, its key) or removed.",
+        ),
+        Signal(
             identifier="@bank/bankaccount",
             kinds=["CREATED", "UPDATED"],
             descriptors=["@bank/kind", "@bank/currency", NEW_TRANSACTIONS, UPDATED_TRANSACTIONS],
@@ -148,6 +163,9 @@ def render(facts: Facts) -> dict[str, JSON]:
     if facts.storage is not None:
         document["datalayer"] = blocks.datalayer(facts)
     document["instance"] = blocks.instance(facts)
+    fernet = facts.secrets.get("fernet")
+    if fernet is not None:
+        document["encryption"] = {"key_path": fernet}
     hook = blocks.rekuest_hook(facts)
     if hook is not None:
         document["rekuest_hook"] = hook
@@ -159,7 +177,7 @@ contract = Contract(
         name="bank",
         identifier="live.arkitekt.bank",
         summary="Bank accounts, transactions and budgets.",
-        needs=Needs(scopes=SCOPES, storage=["bigfile"], instance_key=True, peers=["rekuest"]),
+        needs=Needs(scopes=SCOPES, storage=["bigfile"], instance_key=True, peers=["rekuest"], secrets=["fernet"]),
         offers=Offers(endpoints={"rekuest_service": "_rekuest/service", "rekuest_hook": "_rekuest/hook"}),
         requires={"rekuest": ">=6"},
         hosts=HOSTS,

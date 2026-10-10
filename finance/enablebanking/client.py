@@ -10,12 +10,14 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import date
-from pathlib import Path
 from typing import Any
 
 import aiohttp
 import jwt
 from django.conf import settings
+
+from finance.models import BankErrorCode
+from finance.providers.errors import ProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,7 @@ _TOKEN_TTL = 3600
 _TOKEN_MARGIN = 300
 
 
-class EnableBankingError(Exception):
+class EnableBankingError(ProviderError):
     """Enable Banking refused a request."""
 
     def __init__(self, status: int, body: str, path: str) -> None:
@@ -37,38 +39,42 @@ class EnableBankingError(Exception):
 class ConsentExpired(EnableBankingError):
     """The session's consent is gone (expired, withdrawn, or unknown); the user must relink."""
 
+    explicit_code = BankErrorCode.CONSENT_EXPIRED
+
 
 class RateLimited(EnableBankingError):
     """The bank or Enable Banking throttled us (PSD2 access limits); try later."""
 
-
-class NotConfigured(Exception):
-    """This deployment has no Enable Banking credentials."""
-
-    def __init__(self) -> None:
-        super().__init__("Enable Banking is not configured on this server (no `enablebanking` block in its config).")
+    explicit_code = BankErrorCode.RATE_LIMITED
 
 
 @dataclass
 class EnableBankingConfig:
-    """What the client needs; built from ``settings.ENABLEBANKING``."""
+    """What the client needs: one application's credentials (from its provider row) and the deployment's endpoint."""
 
     app_id: str
-    private_key_path: str
+    private_key: bytes
     api_url: str = "https://api.enablebanking.com"
     redirect_urls: list[str] = field(default_factory=list)
     consent_days: int = 90
     psu_type: str = "personal"
     timeout_seconds: float = 60
-    daily_sync_limit: int | None = 4
 
-    @classmethod
-    def from_settings(cls) -> "EnableBankingConfig":
-        """The deployment's configuration; raises :class:`NotConfigured` when there is none."""
-        conf = getattr(settings, "ENABLEBANKING", None)
-        if not conf:
-            raise NotConfigured()
-        return cls(**conf)
+
+@dataclass
+class Application:
+    """The application a key belongs to, as Enable Banking describes it (``GET /application``)."""
+
+    name: str | None
+    environment: str | None
+    active: bool
+    redirect_urls: list[str]
+
+
+def endpoint() -> tuple[str, float]:
+    """The deployment's Enable Banking endpoint: (base URL, request timeout)."""
+    conf: dict[str, Any] = getattr(settings, "ENABLEBANKING", None) or {}
+    return conf.get("api_url", "https://api.enablebanking.com"), conf.get("timeout_seconds", 60)
 
 
 _EXPIRED_MARKERS = ("EXPIRED", "SESSION_DOES_NOT_EXIST", "CLOSED_SESSION", "REVOKED", "ACCESS_DENIED")
@@ -77,8 +83,8 @@ _EXPIRED_MARKERS = ("EXPIRED", "SESSION_DOES_NOT_EXIST", "CLOSED_SESSION", "REVO
 class EnableBankingClient:
     """One client per operation; open it with ``async with``."""
 
-    def __init__(self, config: EnableBankingConfig | None = None) -> None:
-        self.config = config or EnableBankingConfig.from_settings()
+    def __init__(self, config: EnableBankingConfig) -> None:
+        self.config = config
         self._session: aiohttp.ClientSession | None = None
         self._token: str | None = None
         self._token_exp = 0.0
@@ -98,7 +104,7 @@ class EnableBankingClient:
             iat = int(now)
             self._token = jwt.encode(
                 {"iss": "enablebanking.com", "aud": "api.enablebanking.com", "iat": iat, "exp": iat + _TOKEN_TTL},
-                Path(self.config.private_key_path).read_bytes(),
+                self.config.private_key,
                 algorithm="RS256",
                 headers={"kid": self.config.app_id},
             )
@@ -106,7 +112,7 @@ class EnableBankingClient:
         return {"Authorization": f"Bearer {self._token}"}
 
     async def _request(self, method: str, path: str, *, json: dict | None = None, params: dict | None = None, psu_headers: dict[str, str] | None = None) -> Any:
-        assert self._session is not None, "use `async with EnableBankingClient() as client`"
+        assert self._session is not None, "use `async with EnableBankingClient(config) as client`"
         headers = {**self._auth_header(), **(psu_headers or {})}
         url = self.config.api_url.rstrip("/") + path
         async with self._session.request(method, url, json=json, params=params, headers=headers) as response:
@@ -118,6 +124,11 @@ class EnableBankingClient:
         if response.status in (401, 403, 404, 410, 422) and any(marker in body.upper() for marker in _EXPIRED_MARKERS):
             raise ConsentExpired(response.status, body, path)
         raise EnableBankingError(response.status, body, path)
+
+    async def application(self) -> Application:
+        """The application this client's key belongs to; fails when the key or app id is not Enable Banking's."""
+        data = await self._request("GET", "/application")
+        return Application(name=data.get("name"), environment=data.get("environment"), active=bool(data.get("active", True)), redirect_urls=list(data.get("redirect_urls") or []))
 
     async def aspsps(self, country: str | None = None) -> list[dict]:
         """The banks (ASPSPs) Enable Banking can reach, optionally in one country."""

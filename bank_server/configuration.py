@@ -14,40 +14,40 @@ from pydantic import BaseModel, ByteSize, ConfigDict, Field
 from arkitekt_service.server.settings import DjangoSettings, InstanceSettings, PostgresSettings, RedisSettings, ServiceSettings
 from authentikate.base_models import AuthentikateSettings
 
-class EnableBankingSettings(BaseModel):
-    """Enable Banking (PSD2 aggregator) application credentials.
+class EncryptionSettings(BaseModel):
+    """The key provider credentials are encrypted with at rest.
 
-    One Enable Banking application per deployment. Its private key is read from a
-    mounted file at request time; it is never inlined in config nor committed.
+    An organization's providers (an Enable Banking application's private key) and its logins
+    (Scalable's tokens) are stored Fernet-encrypted with this key, so a database dump alone is
+    not enough.
     """
 
-    app_id: str = Field(description="The Enable Banking application id. Also the ``kid`` of every JWT this service signs.")
-    private_key_path: str = Field(description="Path to the application's RS256 private key (``<app-id>.pem``). Secret — mount it, never commit it.")
+    key_path: str = Field(description="Path to a Fernet key (``Fernet.generate_key()``). Secret — mount it, never commit it. Losing it means setting every provider up and linking again.")
+
+
+class EnableBankingSettings(BaseModel):
+    """Where Enable Banking (the PSD2 aggregator) is reached.
+
+    Only the endpoint is the deployment's. An application — its id, its private key, its
+    redirect URLs — is a provider an organization's admin creates in the client.
+    """
+
     api_url: str = Field(default="https://api.enablebanking.com", description="Base URL of the Enable Banking API.")
-    redirect_urls: List[str] = Field(
-        default_factory=lambda: ["https://johannesroos.de/callback"],
-        description="Redirect URLs registered for the application. A client may pick one per link; the first is the default. Anything else is refused.",
-    )
-    consent_days: int = Field(default=90, description="How long a new bank consent is requested for, in days (banks may cap it).")
-    psu_type: str = Field(default="personal", description="PSU type sent on authorization: ``personal`` or ``business``.")
     timeout_seconds: float = Field(default=60, description="Timeout for a single Enable Banking request.")
-    daily_sync_limit: int = Field(default=4, description="Syncs per account per UTC day before the service stops asking the bank (banks cap PSD2 access at about 4 a day). Clients see the budget as `syncsRemainingToday`.")
 
 
 class ScalableSettings(BaseModel):
-    """Scalable Capital broker access through Scalable's official CLI API (OAuth device login + DPoP).
+    """Where Scalable Capital's official CLI API (OAuth device login + DPoP) is reached.
 
-    The endpoint and client defaults are the official CLI's production channel. Linked
-    accounts' credentials are stored encrypted with the Fernet key at ``secret_key_path``.
+    The defaults are the official CLI's production channel. Whether an organization uses
+    Scalable is a provider its admin creates in the client; there are no credentials to configure.
     """
 
-    secret_key_path: str = Field(description="Path to a Fernet key (``Fernet.generate_key()``) encrypting stored Scalable credentials. Secret — mount it, never commit it. Losing it means relinking.")
     issuer: str = Field(default="https://secure.scalable.capital", description="The OAuth issuer (device code, token, revoke endpoints).")
     audience: str = Field(default="https://de.scalable.capital/api-gateway", description="The OAuth audience.")
     client_id: str = Field(default="yBM3BrpRgwSTJZRdJllvtD6jJEmyxWfE", description="The public OAuth client id of Scalable's CLI.")
     graphql_url: str = Field(default="https://de.scalable.capital/api/cli/graphql", description="Scalable's CLI GraphQL endpoint.")
     user_agent: str = Field(default="arkitekt-bank", description="User-Agent sent to Scalable.")
-    daily_sync_limit: Optional[int] = Field(default=None, description="Syncs per account per UTC day; null is unlimited (Scalable is not a PSD2 consent).")
     timeout_seconds: float = Field(default=30, description="Timeout for a single Scalable request.")
 
 
@@ -210,8 +210,9 @@ class Settings(ServiceSettings):
     postgres: PostgresSettings = Field(description="PostgreSQL connection.")
     redis: RedisSettings = Field(description="Redis connection.")
     authentikate: AuthentikateSettings = Field(description="Token-verification config (authentikate).")
-    enablebanking: Optional[EnableBankingSettings] = Field(default=None, description="Enable Banking credentials. Without them the service still serves stats, categories and budgets, but cannot link or sync banks.")
-    scalable: Optional[ScalableSettings] = Field(default=None, description="Scalable Capital access. Without it Scalable cannot be linked.")
+    encryption: Optional[EncryptionSettings] = Field(default=None, description="The key provider credentials are encrypted with. Without it no provider that holds credentials can be set up and Scalable cannot be linked.")
+    enablebanking: EnableBankingSettings = Field(default_factory=EnableBankingSettings, description="Where Enable Banking is reached. Its applications are providers created in the client.")
+    scalable: ScalableSettings = Field(default_factory=ScalableSettings, description="Where Scalable Capital is reached.")
     sync: SyncSettings = Field(default_factory=SyncSettings, description="How syncs run.")
     embeddings: EmbeddingsSettings = Field(default_factory=EmbeddingsSettings, description="Semantic search model and thresholds.")
     categorization: CategorizationSettings = Field(default_factory=CategorizationSettings, description="Semantic categorization (suggestions and automatic assignment).")

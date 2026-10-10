@@ -2,7 +2,8 @@
 
 Every field requires an authenticated caller (``AuthExtension``) and every read is limited to
 the caller's active organization (``OrgScoped`` types, ``get_for_org`` lookups). Any member
-of an organization may link, sync, categorize and budget.
+of an organization may link, sync, categorize and budget; only its admins set up the providers
+banks are linked through (``admin_mutation``).
 
 * ``AuthentikateExtension`` — authenticates the request from its bearer token
   and exposes the user/organization/client on ``info.context.request``.
@@ -51,6 +52,11 @@ def upload_mutation(**kwargs):  # noqa: ANN201
     return strawberry_django.mutation(extensions=[AuthExtension(any_role_of=roles)], **kwargs)
 
 
+def admin_mutation(**kwargs):  # noqa: ANN201
+    """A mutation only an admin of the request's organization may run (the role is the membership's, not the token's)."""
+    return strawberry_django.mutation(extensions=[AuthExtension(org_roles=["admin"])], **kwargs)
+
+
 def subscription(**kwargs):  # noqa: ANN201
     """A subscription that requires authentication."""
     return strawberry.subscription(extensions=[AuthSubscribeExtension()], **kwargs)
@@ -60,6 +66,9 @@ def subscription(**kwargs):  # noqa: ANN201
 class Query:
     """The root query type."""
 
+    bank_providers: list[types.BankProvider] = field(description="The providers the organization set up; banks are linked through one.")
+    bank_provider: types.BankProvider = field(resolver=queries.bank_provider, description="A provider by id.")
+    provider_kinds: list[types.ProviderKind] = field(resolver=queries.provider_kinds, description="The kinds of provider this server can run, each with its capabilities.")
     bank_connections: list[types.BankConnection] = field(description="The organization's bank connections.")
     bank_connection: types.BankConnection = field(resolver=queries.bank_connection, description="A bank connection by id.")
     bank_accounts: list[types.BankAccount] = field(description="The organization's bank accounts.")
@@ -105,7 +114,8 @@ class Query:
     recurring_payments: list[types.RecurringPayment] = field(description="Detected recurring payments.")
     recurring_payment: types.RecurringPayment = field(resolver=queries.recurring_payment, description="A recurring payment by id.")
     holdings: list[types.HoldingSnapshot] = field(resolver=queries.holdings, description="A depot's positions on a day (its latest synced day by default).")
-    bank_institutions: list[types.Institution] = field(resolver=queries.bank_institutions, description="The banks that can be linked in a country.")
+    bank_institutions: list[types.Institution] = field(resolver=queries.bank_institutions, description="The banks a provider can link in a country.")
+    auth_session: types.AuthSession = field(resolver=mutations.auth_session, description="Where a login is. No side effect.")
 
     spending_by_category: list[types.CategoryTotal] = field(resolver=queries.spending_by_category, description="Income, expense and net per category and currency.")
     cashflow: list[types.CashflowBucket] = field(resolver=queries.cashflow, description="Income, expense and net per month or week and currency.")
@@ -119,13 +129,16 @@ class Query:
 class Mutation:
     """The root mutation type."""
 
-    start_bank_link = mutation(resolver=mutations.start_bank_link, description="Start linking a bank; returns the auth session (finish: REDIRECT).")
-    complete_bank_link = mutation(resolver=mutations.complete_bank_link, description="Finish linking a bank with the redirect's code and state.")
+    create_enable_banking_provider = admin_mutation(resolver=mutations.create_enable_banking_provider, description="Admins: set up an Enable Banking application (id and private key) as a provider.")
+    update_enable_banking_provider = admin_mutation(resolver=mutations.update_enable_banking_provider, description="Admins: change an Enable Banking provider; an empty key keeps the stored one.")
+    create_scalable_provider = admin_mutation(resolver=mutations.create_scalable_provider, description="Admins: let the organization link Scalable Capital.")
+    update_provider = admin_mutation(resolver=mutations.update_provider, description="Admins: rename, enable or disable any provider, or change its capabilities.")
+    delete_provider = admin_mutation(resolver=mutations.delete_provider, description="Admins: remove a provider that has no active or pending connections.")
+    start_link = mutation(resolver=mutations.start_link, description="Start a login through a provider; returns the auth session.")
+    complete_auth = mutation(resolver=mutations.complete_auth, description="REDIRECT: finish with the code. POLL: advance one step; call until not PENDING.")
+    resume_auth = mutation(resolver=mutations.resume_auth, description="The same login again (a fresh openUrl if the old one cannot be reused).")
+    cancel_auth = mutation(resolver=mutations.cancel_auth, description="Drop a login that will not be finished. Idempotent.")
     revoke_bank_connection = mutation(resolver=mutations.revoke_bank_connection, description="Withdraw a bank consent; data is kept.")
-    resume_link = mutation(resolver=mutations.resume_link, description="Get the auth session of a pending link you started again (to continue a login).")
-    cancel_link = mutation(resolver=mutations.cancel_link, description="Delete a pending link you started.")
-    start_scalable_link = mutation(resolver=mutations.start_scalable_link, description="Start linking Scalable Capital; returns the auth session (finish: POLL).")
-    complete_scalable_link = mutation(resolver=mutations.complete_scalable_link, description="Advance a Scalable Capital link; call until the connection is ACTIVE.")
     sync_account = mutation(resolver=mutations.sync_account, description="Pull an account from the bank now.")
     sync_connection = mutation(resolver=mutations.sync_connection, description="Pull every account of a connection now.")
 

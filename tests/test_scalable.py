@@ -16,7 +16,7 @@ from finance.scalable.client import ScalableClient
 from finance.scalable.dpop import DpopKey
 from finance.scalable.queries import OPERATIONS
 from finance.scalable.tokens import session_for
-from tests.conftest import SCALABLE_COMPLETE, SCALABLE_START, cash, holding, trade
+from tests.conftest import SCALABLE_COMPLETE, SCALABLE_START, cash, connection_of, holding, trade
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -129,66 +129,68 @@ async def test_trades_and_deposits_stay_out_of_spending(scalable_link, aexecute,
     assert flow == [{"income": "12.34", "expense": "4.99", "count": 2}]
 
 
-async def test_link_waits_for_the_device_code_and_respects_the_interval(aexecute, fakescalable):
+async def test_link_waits_for_the_device_code_and_respects_the_interval(aexecute, fakescalable, sc_provider):
     fakescalable.seed({"p1": portfolio()})
     fakescalable.config(interval=1)
-    started = (await aexecute(SCALABLE_START)).data["startScalableLink"]
-    assert started["connection"]["linkStep"] == "DEVICE" and started["interval"] == 1
+    started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data["startLink"]
+    assert started["status"] == "PENDING" and started["step"] is None and started["interval"] == 1
     seen = len(fakescalable.log())
 
-    first = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeScalableLink"]
-    second = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeScalableLink"]  # too early: not polled
+    first = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeAuth"]
+    second = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeAuth"]  # too early: not polled
     polls = [e for e in fakescalable.log()[seen:] if e.get("grant") == "urn:ietf:params:oauth:grant-type:device_code"]
     fakescalable.approve(started["userCode"])
     await asyncio.sleep(1.1)
-    done = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeScalableLink"]
+    done = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeAuth"]
 
-    assert first["status"] == second["status"] == "PENDING" and first["linkStep"] == "DEVICE"
+    assert first["status"] == second["status"] == "PENDING" and first["step"] is None
     assert len(polls) == 1
-    assert done["status"] == "ACTIVE" and len(done["accounts"]) == 2
+    linked = await connection_of(aexecute, done)
+    assert linked["status"] == "ACTIVE" and len(linked["accounts"]) == 2
+    assert done["result"]["label"] == "Scalable Capital"
 
 
-async def test_link_with_second_factor(aexecute, fakescalable):
+async def test_link_with_second_factor(aexecute, fakescalable, sc_provider):
     fakescalable.seed({"p1": portfolio()}, mfa=True)
-    started = (await aexecute(SCALABLE_START)).data["startScalableLink"]
+    started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data["startLink"]
     fakescalable.approve(started["userCode"])
 
-    waiting = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeScalableLink"]
-    still = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeScalableLink"]
+    waiting = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeAuth"]
+    still = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeAuth"]
     fakescalable.mfa("SUCCESS")
-    done = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeScalableLink"]
+    done = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeAuth"]
 
-    assert (waiting["status"], waiting["linkStep"]) == ("PENDING", "MFA")
-    assert still["status"] == "PENDING"
-    assert done["status"] == "ACTIVE"
+    assert (waiting["status"], waiting["step"]) == ("PENDING", "MFA")
+    assert (still["status"], still["step"]) == ("PENDING", "MFA")
+    assert done["status"] == "DONE" and done["step"] is None
 
 
-async def test_denied_second_factor_fails_the_link(aexecute, fakescalable):
+async def test_denied_second_factor_fails_the_link(aexecute, fakescalable, sc_provider):
     fakescalable.seed({"p1": portfolio()}, mfa=True)
-    started = (await aexecute(SCALABLE_START)).data["startScalableLink"]
+    started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data["startLink"]
     fakescalable.approve(started["userCode"])
     await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})
     fakescalable.mfa("DENY")
 
-    result = await aexecute(SCALABLE_COMPLETE, {"state": started["state"]}, allow_errors=True)
+    result = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeAuth"]
 
-    assert result.errors[0].extensions["code"] == "MFA_REJECTED"
+    assert (result["status"], result["errorCode"]) == ("FAILED", "MFA_REJECTED") and result["errorMessage"]
     connection = await models.BankConnection.objects.aget(state=started["state"])
     assert connection.status == models.ConnectionStatus.FAILED and connection.secret is None
 
 
-async def test_denied_login_code_fails_the_link(aexecute, fakescalable):
-    started = (await aexecute(SCALABLE_START)).data["startScalableLink"]
+async def test_denied_login_code_fails_the_link(aexecute, fakescalable, sc_provider):
+    started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data["startLink"]
     fakescalable.deny(started["userCode"])
 
-    result = await aexecute(SCALABLE_COMPLETE, {"state": started["state"]}, allow_errors=True)
+    result = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeAuth"]
 
-    assert result.errors[0].extensions["code"] == "MFA_REJECTED"
+    assert (result["status"], result["errorCode"]) == ("FAILED", "MFA_REJECTED")
 
 
-async def test_another_organization_cannot_advance_the_link(aexecute, fakescalable, other_org_context):
+async def test_another_organization_cannot_advance_the_link(aexecute, fakescalable, other_org_context, sc_provider):
     fakescalable.seed({"p1": portfolio()})
-    started = (await aexecute(SCALABLE_START)).data["startScalableLink"]
+    started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data["startLink"]
     fakescalable.approve(started["userCode"])
 
     result = await aexecute(SCALABLE_COMPLETE, {"state": started["state"]}, context=other_org_context, allow_errors=True)
@@ -237,15 +239,15 @@ async def test_revoking_logs_out_at_scalable_and_forgets_credentials(scalable_li
     assert (await models.BankConnection.objects.aget(id=connection["id"])).secret is None
 
 
-async def test_only_allowed_operations_ever_reach_scalable(aexecute, fakescalable):
+async def test_only_allowed_operations_ever_reach_scalable(aexecute, fakescalable, sc_provider):
     fakescalable.seed({"p1": portfolio()}, savings={"s1": {"total": 1}}, mfa=True)
     fakescalable.mfa("SUCCESS")
     seen = len(fakescalable.log())
-    started = (await aexecute(SCALABLE_START)).data["startScalableLink"]
+    started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data["startLink"]
     fakescalable.approve(started["userCode"])
     await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})  # starts the second factor
-    connection = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeScalableLink"]
-    await aexecute(SYNC_CONNECTION, {"id": connection["id"]})
+    done = (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]})).data["completeAuth"]
+    await aexecute(SYNC_CONNECTION, {"id": done["result"]["id"]})
 
     sent = {e["operation"] for e in fakescalable.log()[seen:] if "operation" in e}
     assert {"Start2faOnLogin", "BrokerHoldings", "OvernightTransactions"} <= sent

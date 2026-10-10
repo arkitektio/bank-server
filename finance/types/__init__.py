@@ -16,7 +16,9 @@ from django.db.models import Max, Min, Sum
 from django.utils import timezone
 from strawberry.scalars import JSON
 
-from finance import enums, filters, models
+from kante.types import Info
+
+from finance import auth_sessions, enums, filters, models
 from finance.types._shared import DESCRIPTORS_DESCRIPTION, OrgScoped, resolve_descriptors
 from finance.types.auth import Organization, User
 
@@ -27,13 +29,136 @@ def _model_id() -> str:
     return engine.model_id()
 
 
+@strawberry.type(description="A capability of a provider kind: something it can do, which an admin switches on or off per provider.")
+class ProviderCapabilityInfo:
+    capability: enums.ProviderCapability
+    label: str
+    description: str
+
+
+@strawberry.type(description="A kind of provider this server can run. What a client needs to offer it, without knowing the kinds itself.")
+class ProviderKind:
+    kind: enums.Provider
+    label: str
+    description: str
+    finish: enums.AuthFinish = strawberry.field(description="How a login through it finishes.")
+    capabilities: List[ProviderCapabilityInfo] = strawberry.field(description="Everything the kind can do; a provider enables a subset.")
+    has_institutions: bool = strawberry.field(description="True when a link is to one of many banks: pick one from `bankInstitutions` and pass it to `startLink`.")
+    default_daily_sync_limit: Optional[int] = strawberry.field(description="Syncs per account per day a new provider starts with (null: unlimited).")
+
+
+def provider_kind(kind: str) -> ProviderKind:
+    """A kind as its backend class declares it."""
+    from finance.providers.base import CAPABILITIES
+    from finance.providers.registry import kind_of
+
+    backend = kind_of(kind)
+    return ProviderKind(
+        kind=enums.Provider(backend.kind.value),
+        label=backend.label,
+        description=backend.description,
+        finish=enums.AuthFinish(backend.finish),
+        capabilities=[
+            ProviderCapabilityInfo(capability=enums.ProviderCapability(info.capability.value), label=info.label, description=info.description)
+            for capability, info in CAPABILITIES.items()
+            if capability in backend.capabilities
+        ],
+        has_institutions=backend.has_institutions,
+        default_daily_sync_limit=backend.default_daily_sync_limit,
+    )
+
+
+@strawberry.type(description="The settings of an Enable Banking provider. Its private key is never returned.")
+class EnableBankingProviderSettings:
+    app_id: str = strawberry.field(description="The Enable Banking application id.")
+    redirect_urls: List[str] = strawberry.field(description="The redirect URLs a link may use; the first is the default.")
+    consent_days: int = strawberry.field(description="How long a new consent is requested for, in days.")
+    psu_type: str = strawberry.field(description="`personal` or `business`.")
+    key_fingerprint: str = strawberry.field(description="A fingerprint of the stored private key's public half, to recognise which key is in use.")
+
+
+@kante.django_type(models.BankProvider, pagination=True, filters=filters.BankProviderFilter, description="A provider the organization set up (an Enable Banking application, Scalable Capital). Banks are linked through one; credentials are never returned.")
+class BankProvider(OrgScoped):
+    id: strawberry.ID
+    descriptors: JSON = strawberry_django.field(resolver=resolve_descriptors, description=DESCRIPTORS_DESCRIPTION)
+    name: str
+    kind: enums.Provider
+    enabled: bool = strawberry_django.field(description="A disabled provider starts no links and syncs nothing.")
+    daily_sync_limit: Optional[int] = strawberry_django.field(description="Syncs per account per day before the service stops asking the provider (null: unlimited).")
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    creator: Optional[User]
+    organization: Organization
+    connections: List["BankConnection"] = strawberry_django.field(description="The consents and logins made through it.")
+
+    @strawberry_django.field(description="The capabilities switched on for this provider.")
+    def capabilities(self) -> List[enums.ProviderCapability]:
+        return [enums.ProviderCapability(value) for value in self.capabilities]  # type: ignore[attr-defined]
+
+    @strawberry_django.field(description="What its kind is and can do.")
+    def kind_info(self) -> ProviderKind:
+        return provider_kind(self.kind)
+
+    @strawberry_django.field(description="Its settings when it is an Enable Banking provider, else null.")
+    def enable_banking(self) -> Optional[EnableBankingProviderSettings]:
+        from finance.providers.enablebanking import EnableBankingSettings
+
+        if self.kind != models.Provider.ENABLEBANKING:
+            return None
+        values = EnableBankingSettings.model_validate(self.settings)  # type: ignore[attr-defined]
+        return EnableBankingProviderSettings(app_id=values.app_id, redirect_urls=values.redirect_urls, consent_days=values.consent_days, psu_type=values.psu_type, key_fingerprint=values.key_fingerprint)
+
+
+@strawberry.type(description="A Structure: what the login linked, so the app can open its page.")
+class AuthResult:
+    identifier: str
+    id: strawberry.ID
+    label: Optional[str] = None
+
+
+@strawberry.type(description="A login at an external provider, the same shape in every service. Open `openUrl` in the user's browser; then, by `finish`: REDIRECT — the provider redirects to `redirectUrl` with `code` and `state`, call `completeAuth` with both; POLL — call `completeAuth` with the `state` every `interval` seconds until `status` is not PENDING.")
+class AuthSession:
+    state: str = strawberry.field(description="Opaque, unguessable, single-use, stored server-side. THE handle of the login.")
+    status: enums.AuthStatus
+    finish: enums.AuthFinish
+    open_url: str = strawberry.field(description="https. What the app opens in the user's browser.")
+    expires_at: datetime.datetime = strawberry.field(description="Until when the first approval can happen.")
+    redirect_url: Optional[str] = strawberry.field(default=None, description="REDIRECT: where the provider sends the browser back to (the relay URL).")
+    interval: Optional[int] = strawberry.field(default=None, description="POLL: seconds between two completeAuth calls.")
+    user_code: Optional[str] = strawberry.field(default=None, description="POLL: the code the user confirms on the provider's page.")
+    step: Optional[str] = strawberry.field(default=None, description="Null until the first approval; then what is still awaited, e.g. MFA.")
+    error_code: Optional[str] = strawberry.field(default=None, description="FAILED: machine-readable, the service's own error codes.")
+    error_message: Optional[str] = strawberry.field(default=None, description="FAILED: one sentence for the user.")
+    result: Optional[AuthResult] = strawberry.field(default=None, description="DONE: what was linked. May be set earlier when it already exists (a relink).")
+
+    @classmethod
+    def of(cls, session: "auth_sessions.AuthSession") -> "AuthSession":
+        """The GraphQL shape of a described login."""
+        result = session.result
+        return cls(
+            state=session.state,
+            status=enums.AuthStatus(session.status),
+            finish=enums.AuthFinish(session.finish),
+            open_url=session.open_url,
+            expires_at=session.expires_at,
+            redirect_url=session.redirect_url,
+            interval=session.interval,
+            user_code=session.user_code,
+            step=session.step,
+            error_code=session.error_code,
+            error_message=session.error_message,
+            result=AuthResult(identifier=result.identifier, id=strawberry.ID(result.id), label=result.label) if result else None,
+        )
+
+
 @kante.django_type(models.BankConnection, pagination=True, filters=filters.BankConnectionFilter, description="One consent at one bank. Accounts are synced through it while it is ACTIVE.")
 class BankConnection(OrgScoped):
     id: strawberry.ID
     descriptors: JSON = strawberry_django.field(resolver=resolve_descriptors, description=DESCRIPTORS_DESCRIPTION)
     aspsp_name: str
     aspsp_country: str
-    provider: enums.Provider
+    provider: enums.Provider = strawberry_django.field(description="The kind of provider it goes through.")
+    bank_provider: Optional[BankProvider] = strawberry_django.field(description="The organization's provider it was made through; null when it is attached to none (it then cannot sync until an admin sets its provider up again).")
     status: enums.ConnectionStatus
     link_step: Optional[enums.LinkStep]
     valid_until: Optional[datetime.datetime]
@@ -44,6 +169,18 @@ class BankConnection(OrgScoped):
     creator: Optional[User]
     organization: Organization
 
+    @classmethod
+    def get_queryset(cls, queryset, info, **kwargs):  # noqa: ANN001, ANN003, ANN206
+        # A cancelled login is kept only so `authSession` can still answer for it.
+        return super().get_queryset(queryset, info, **kwargs).exclude(status=models.ConnectionStatus.CANCELLED)
+
+    @strawberry_django.field(description="The login still to be finished, when you started it and it is PENDING: continue it with `resumeAuth(state)`. Null otherwise.")
+    def pending_auth(self, info: Info) -> Optional[AuthSession]:
+        if self.status != models.ConnectionStatus.PENDING or self.creator_id != info.context.request.user.id:  # type: ignore[attr-defined]
+            return None
+        session = auth_sessions.describe(self)  # type: ignore[arg-type]
+        return AuthSession.of(session) if session.status == "PENDING" else None
+
     @strawberry_django.field(description="The accounts reached through this connection (through their syncers).")
     def accounts(self) -> List["BankAccount"]:
         return list(models.BankAccount.objects.filter(syncers__connection_id=self.id).distinct().order_by("id"))  # type: ignore[return-value]
@@ -52,7 +189,7 @@ class BankConnection(OrgScoped):
     def syncers(self) -> List["AccountSyncer"]:
         return list(self.syncers.order_by("id"))  # type: ignore[attr-defined, return-value]
 
-    @strawberry_django.field(description="PENDING only: when the login can no longer be completed. Nothing flips it on a timer — past this, a PENDING link is dead: hide it or `cancelLink` it.")
+    @strawberry_django.field(description="PENDING only: when the login can no longer be completed. Nothing flips it on a timer — past this, a PENDING link is dead: hide it or `cancelAuth` it.")
     def pending_expires_at(self) -> Optional[datetime.datetime]:
         return self.pending_expires_at if self.status == models.ConnectionStatus.PENDING else None  # type: ignore[return-value]
 
@@ -347,25 +484,13 @@ class RecurringPayment(OrgScoped):
 # --- Results that are not rows ----------------------------------------------------------------
 
 
-@strawberry.type(description="A bank Enable Banking can reach.")
+@strawberry.type(description="A bank a provider can reach.")
 class Institution:
     name: str
     country: str
     logo: Optional[str] = None
     bic: Optional[str] = None
     maximum_consent_days: Optional[int] = strawberry.field(default=None, description="The longest consent this bank grants, in days.")
-
-
-@strawberry.type(description="A started (or resumed) login, the same shape for every provider. Open `openUrl` in the user's browser; then, by `finish`: REDIRECT — the provider redirects to `redirectUrl` with `code` and `state`, call `completeBankLink`; POLL — call `completeScalableLink(state)` every `interval` seconds until the connection is ACTIVE. `state` is stored server-side, so any replica completes it and `resumeLink` returns it again.")
-class AuthSession:
-    state: str
-    open_url: str
-    expires_at: datetime.datetime
-    finish: enums.AuthFinish
-    interval: Optional[int] = strawberry.field(default=None, description="POLL only: seconds between complete calls.")
-    user_code: Optional[str] = strawberry.field(default=None, description="POLL only: the code the user checks on the provider's page.")
-    redirect_url: Optional[str] = strawberry.field(default=None, description="REDIRECT only: where the provider sends the browser back to.")
-    connection: BankConnection
 
 
 @strawberry.type(description="A likely category for a transaction.")

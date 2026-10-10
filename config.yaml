@@ -28,20 +28,16 @@ postgres:
   password: postgres
   port: 5432
   username: fostgres
-# Enable Banking: the application id and the path of its mounted key (never commit it).
-# Without this block linking and syncing banks answer NOT_CONFIGURED.
-# enablebanking:
-#   app_id: <your Enable Banking application id>
-#   private_key_path: /secrets/enablebanking.pem
-#   redirect_urls:
-#   - https://johannesroos.de/callback
+# The Fernet key provider credentials are stored encrypted with (never commit it). Providers
+# themselves (an Enable Banking application's id and .pem, Scalable) are created by an
+# organization's admin in the client; without this block that answers NOT_CONFIGURED.
+# encryption:
+#   key_path: /secrets/bank.fernet   # Fernet.generate_key()
 # embeddings:            # all optional (see CONFIG.md)
 #   enabled: true
 # categorization:
 #   auto_assign: true
 #   auto_assign_threshold: 0.75
-# scalable:
-#   secret_key_path: /secrets/scalable.fernet   # Fernet.generate_key(); encrypts stored Scalable tokens
 # datalayer:             # S3 for uploaded statement exports (createFinanzguruImport); see CONFIG.md
 #   role_arn: arn:aws:iam::000000000000:role/datalayer
 #   access_key: <rustfs user>
