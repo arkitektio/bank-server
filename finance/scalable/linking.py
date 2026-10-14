@@ -77,9 +77,12 @@ def _claim(connection_id: int) -> tuple[models.BankConnection, bool]:
 
 
 def _fail(connection_id: int, message: str, code: str | None) -> models.BankConnection:
+    from bank_server.service import restore_connection  # it imports finance.models
+
     models.BankConnection.objects.filter(id=connection_id).update(
         status=models.ConnectionStatus.FAILED, last_error=message[:2000], last_error_code=code, secret=None, token_lease_until=None
     )
+    restore_connection(connection_id)
     return models.BankConnection.objects.get(id=connection_id)
 
 
@@ -111,7 +114,11 @@ def _activate(connection_id: int, secret: dict, portfolios: list[str], savings: 
 
 
 def _update(connection_id: int, **fields) -> None:  # noqa: ANN003
+    from bank_server.service import restore_connection  # it imports finance.models
+
     models.BankConnection.objects.filter(id=connection_id).update(**fields)
+    if "link_step" in fields:  # a descriptor; the polling fields are not
+        restore_connection(connection_id)
 
 
 async def _step(connection: models.BankConnection, client: ScalableClient) -> models.BankConnection:

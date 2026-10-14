@@ -9,7 +9,7 @@ import strawberry
 import strawberry_django
 from strawberry.scalars import JSON
 
-from finance import models
+from finance import filters, models
 from finance.types import BankAccount, Category, OrgScoped
 from finance.types._shared import DESCRIPTORS_DESCRIPTION, resolve_descriptors
 from finance.types.auth import User
@@ -84,7 +84,7 @@ def _accounts(report: dict, key: str = "accounts") -> list[ImportAccountPlan]:
     ]
 
 
-@kante.django_type(models.StatementImport, pagination=True, description="An uploaded statement export: previewed (nothing written), then applied into the accounts. Applying again is idempotent.")
+@kante.django_type(models.StatementImport, pagination=True, filters=filters.StatementImportFilter, description="An uploaded statement export: previewed (nothing written), then applied into the accounts. Applying again is idempotent.")
 class StatementImport(OrgScoped):
     id: strawberry.ID
     descriptors: JSON = strawberry_django.field(resolver=resolve_descriptors, description=DESCRIPTORS_DESCRIPTION)

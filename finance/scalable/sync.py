@@ -201,6 +201,7 @@ def _holding(item: dict) -> dict | None:
 
 def persist(syncer_id: int, fetched: Fetched, result) -> None:  # noqa: ANN001 - finance.sync.SyncResult
     """Write one fetch in a single transaction; fills in ``result``."""
+    from bank_server.service import service  # it imports finance.models
     from finance.sync import categorize_rows, mark_synced, take_over_imported
 
     now = timezone.now()
@@ -229,8 +230,11 @@ def persist(syncer_id: int, fetched: Fetched, result) -> None:  # noqa: ANN001 -
                 tx.updated_at = now
                 to_update.append(tx)
         embed_rows(to_create + to_update)
-        models.Transaction.objects.bulk_create(to_create)
-        models.Transaction.objects.bulk_update(to_update, FIELDS + ["fingerprint", "syncer", "origin", "is_transfer", "updated_at", *EMBEDDING_FIELDS], batch_size=500)
+        # No pre_save sees a bulk write: the rows are described before they are written.
+        models.Transaction.objects.bulk_create(service.stamp(to_create))
+        models.Transaction.objects.bulk_update(
+            service.stamp(to_update), FIELDS + ["fingerprint", "syncer", "origin", "is_transfer", "updated_at", "stored_descriptors", *EMBEDDING_FIELDS], batch_size=500
+        )
         result.created, result.updated = len(to_create), len(to_update)
 
         if fetched.balance is not None:

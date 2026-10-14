@@ -70,6 +70,8 @@ def match(organization_id: int, transaction_ids: list[int]) -> int:
     (source AUTO). Rows a user linked (MANUAL) are left alone; a row linked earlier by a rule or
     an alias that nothing matches any more loses its merchant.
     """
+    from bank_server.descriptors import TRANSACTION_FIELDS
+    from bank_server.service import service  # it imports finance.models
     from finance.rules import matches
 
     if not transaction_ids:
@@ -79,7 +81,8 @@ def match(organization_id: int, transaction_ids: list[int]) -> int:
     rows = list(
         models.Transaction.objects.filter(account__organization_id=organization_id, id__in=transaction_ids)
         .exclude(merchant_source=models.MerchantSource.MANUAL)
-        .only("id", "counterparty", "counterparty_iban", "remittance", "amount", "merchant_id", "merchant_location_id", "merchant_source")
+        # What the rows are described by too: a changed row is stamped, without a query per field.
+        .only("id", "counterparty", "counterparty_iban", "remittance", "merchant_location_id", "merchant_source", "stored_descriptors", *TRANSACTION_FIELDS)
     )
     locations: dict[tuple[int, str], int] = {}
     changed = []
@@ -104,7 +107,7 @@ def match(organization_id: int, transaction_ids: list[int]) -> int:
         if (tx.merchant_id, tx.merchant_location_id, tx.merchant_source) != (merchant_id, location_id, source):
             tx.merchant_id, tx.merchant_location_id, tx.merchant_source = merchant_id, location_id, source
             changed.append(tx)
-    models.Transaction.objects.bulk_update(changed, ["merchant", "merchant_location", "merchant_source"], batch_size=500)
+    models.Transaction.objects.bulk_update(service.stamp(changed), ["merchant", "merchant_location", "merchant_source", "stored_descriptors"], batch_size=500)
     return len(changed)
 
 
@@ -123,12 +126,15 @@ def _store(merchant_id: int, code: str) -> int:
 
 def categorize_by_merchant(organization_id: int, transaction_ids: list[int]) -> int:
     """Give transactions their merchant's category (source MERCHANT) where nobody pinned one; returns how many changed."""
+    from bank_server.descriptors import TRANSACTION_FIELDS
+    from bank_server.service import service  # it imports finance.models
+
     if not transaction_ids:
         return 0
     rows = (
         models.Transaction.objects.filter(account__organization_id=organization_id, id__in=transaction_ids, category_source__in=OVERWRITABLE)
         .select_related("merchant__category")
-        .only("id", "category_id", "category_source", "merchant__category__id", "merchant__category__hidden")
+        .only("id", "category_source", "stored_descriptors", *TRANSACTION_FIELDS, "merchant__category__id", "merchant__category__hidden")
     )
     changed = []
     for tx in rows:
@@ -140,7 +146,7 @@ def categorize_by_merchant(organization_id: int, transaction_ids: list[int]) -> 
         elif tx.category_source == models.CategorySource.MERCHANT:
             tx.category_id, tx.category_source = None, models.CategorySource.NONE
             changed.append(tx)
-    models.Transaction.objects.bulk_update(changed, ["category", "category_source"], batch_size=500)
+    models.Transaction.objects.bulk_update(service.stamp(changed), ["category", "category_source", "stored_descriptors"], batch_size=500)
     return len(changed)
 
 

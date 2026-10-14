@@ -26,7 +26,9 @@ anything is recreated — and runs everything else as a job the image offers by 
 
 What this service declares:
 
-- Setup, in order: `ensureadmin`.
+- Setup, in order: `ensureadmin`, `restore_descriptors`. The second stores the descriptors of
+  every row that misses a declared key (rows from before a key existed); `--all` describes
+  every row again after a describer changed what a key means.
 - Other jobs: none.
 - Not jobs, on purpose: `import_finanzguru` reads a file from the machine it runs on, which a job's container does not have: it is a developer's tool, and the same import is offered to clients as `createFinanzguruImport`.
 
@@ -34,3 +36,19 @@ What this service declares:
 of this service, the setup run twice. In `deployments/next` the service runs
 `arkitekt-service standalone --debug`, which migrates and then serves: restart its container
 to apply a new migration.
+
+## Descriptors
+
+Every descriptor is stored (`stored_descriptors`, recomputed on every save by
+`arkitekt_service`), so a port's `requires` is the `requires` argument of a list filter, one
+indexed query. The describers are in `bank_server/descriptors.py` and read only the row (a
+relation by its key), so a transaction can be described before it is inserted.
+
+Transactions are written in bulk, and no bulk write sends `pre_save`. Every one keeps the column
+right: `bulk_create` and `bulk_update` stamp their rows first (`service.stamp`, with
+`stored_descriptors` among the updated fields), and an `update()` of a field a descriptor reads
+is followed by `restore_transactions(ids)` / `restore_connection(id)` / `restore_categories(ids)`
+(`bank_server/service.py`), with the ids taken before the update when its filter is what it
+changes. A path that loads transactions with `only()` loads `TRANSACTION_FIELDS` with them.
+Restoring transactions announces nothing (a sync is announced once, on its account); restoring a
+connection or category announces a changed one as UPDATED.

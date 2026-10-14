@@ -266,6 +266,7 @@ def persist(syncer_id: int, raw_transactions: list[dict] | None, raw_balances: l
     ``raw_transactions`` is None when transactions were not fetched (the provider has them
     switched off): the stored ones, pending included, are then left as they are.
     """
+    from bank_server.service import service  # it imports finance.models
     from finance.transfers import detect_transfers
 
     syncer = models.AccountSyncer.objects.get(id=syncer_id)
@@ -289,7 +290,8 @@ def persist(syncer_id: int, raw_transactions: list[dict] | None, raw_balances: l
             models.Transaction(account=account, syncer=syncer, fingerprint=f"pdng:{fp}", **row) for fp, row in zip(fingerprint_all(pending), pending)
         ]
         embed_rows(pending_rows)
-        models.Transaction.objects.bulk_create(pending_rows)
+        # No pre_save sees a bulk write: the rows are described before they are written.
+        models.Transaction.objects.bulk_create(service.stamp(pending_rows))
 
         fingerprints = fingerprint_all(booked)
         existing = {tx.fingerprint: tx for tx in account.transactions.filter(fingerprint__in=fingerprints)}
@@ -308,8 +310,10 @@ def persist(syncer_id: int, raw_transactions: list[dict] | None, raw_balances: l
                 tx.updated_at = now
                 to_update.append(tx)
         embed_rows(to_create + to_update)
-        models.Transaction.objects.bulk_create(to_create)
-        models.Transaction.objects.bulk_update(to_update, BANK_FIELDS + ["fingerprint", "syncer", "origin", "updated_at", *EMBEDDING_FIELDS], batch_size=500)
+        models.Transaction.objects.bulk_create(service.stamp(to_create))
+        models.Transaction.objects.bulk_update(
+            service.stamp(to_update), BANK_FIELDS + ["fingerprint", "syncer", "origin", "updated_at", "stored_descriptors", *EMBEDDING_FIELDS], batch_size=500
+        )
         result.created, result.updated = len(to_create), len(to_update)
 
         for balance in raw_balances:
@@ -338,6 +342,7 @@ def record_failure(syncer_id: int, error: Exception) -> None:
     A rate-limit answer blocks further syncs of the syncer until the provider's ``Retry-After``,
     or — PSD2 limits are per day — the next UTC day.
     """
+    from bank_server.service import restore_connection
     from finance.errors import code_for
 
     code = code_for(error)
@@ -354,9 +359,11 @@ def record_failure(syncer_id: int, error: Exception) -> None:
         syncer.save(update_fields=fields)
         if code == models.BankErrorCode.CONSENT_EXPIRED and syncer.connection_id:
             # Only an ACTIVE consent can expire; a revoked one stays revoked.
-            models.BankConnection.objects.filter(id=syncer.connection_id, status=models.ConnectionStatus.ACTIVE).update(
+            expired = models.BankConnection.objects.filter(id=syncer.connection_id, status=models.ConnectionStatus.ACTIVE).update(
                 status=models.ConnectionStatus.EXPIRED, last_error=message, last_error_code=code
             )
+            if expired:
+                restore_connection(syncer.connection_id)
 
 
 def detect_recurring(account_id: int) -> None:

@@ -1,6 +1,7 @@
 """Base categories: a two-level tree seeded by key, fully editable, never forced back."""
 
 import pytest
+from django.db.migrations.state import StateApps
 
 from finance import models, taxonomy
 from tests.conftest import account
@@ -117,7 +118,8 @@ def test_migration_keys_legacy_defaults_and_fixes_kinds():
     executor.loader.build_graph()
     executor.migrate(after)
     try:
-        _assert_legacy_keyed()
+        # Read as the schema stands after 0005: today's models have columns it does not.
+        _assert_legacy_keyed(executor.loader.project_state(after).apps)
     finally:
         # Leave the schema as every other test expects it: fully migrated.
         executor = MigrationExecutor(connection)
@@ -125,12 +127,13 @@ def test_migration_keys_legacy_defaults_and_fixes_kinds():
         executor.migrate(executor.loader.graph.leaf_nodes("finance"))
 
 
-def _assert_legacy_keyed() -> None:
-    by_name = {c.name: c for c in models.Category.objects.filter(organization__slug="legacy-org").select_related("parent")}
+def _assert_legacy_keyed(apps: StateApps) -> None:
+    Category, CategoryTerm = apps.get_model("finance", "Category"), apps.get_model("finance", "CategoryTerm")
+    by_name = {c.name: c for c in Category.objects.filter(organization__slug="legacy-org").select_related("parent")}
     assert by_name["Groceries"].key == "food.groceries" and by_name["Groceries"].parent.key == "food"
     assert by_name["Rent & Housing"].key == "housing" and by_name["Rent & Housing"].parent is None
     assert by_name["Utilities"].parent_id == by_name["Rent & Housing"].id  # under the legacy root that became housing
     assert by_name["Salary"].parent.key == "income" and by_name["Salary"].parent.kind == "INCOME"
     assert by_name["Bonus"].kind == "INCOME"
     assert by_name["My Own"].key is None and by_name["My Own"].parent is None
-    assert by_name["Groceries"].embedding is not None and models.CategoryTerm.objects.filter(category=by_name["Groceries"]).exists()
+    assert by_name["Groceries"].embedding is not None and CategoryTerm.objects.filter(category=by_name["Groceries"]).exists()

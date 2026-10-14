@@ -12,7 +12,8 @@ from django.db import models
 from authentikate.models import Organization, User
 from koherent.fields import ProvenanceField
 
-from django.contrib.postgres.indexes import GistIndex
+from arkitekt_service.service.described import Described
+from django.contrib.postgres.indexes import GinIndex, GistIndex
 
 from embeddings.models import EMBEDDING_FIELDS, EmbeddedDescriptionMixin, embedding_indexes
 from finance.geo import GeographyPointField, MakePoint
@@ -208,7 +209,7 @@ class RecurringStatus(models.TextChoices):
     IGNORED = "IGNORED", "Ignored; never proposed again"
 
 
-class BankProvider(models.Model):
+class BankProvider(Described):
     """A provider an organization set up: one kind, its settings and credentials, and what is switched on.
 
     For Enable Banking that is one application (its id in ``settings``, its private key
@@ -234,12 +235,13 @@ class BankProvider(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["organization", "name"], name="bank_provider_org_name"),
         ]
+        indexes = [GinIndex(fields=["stored_descriptors"], name="bank_prov_desc_gin", opclasses=["jsonb_path_ops"])]
 
     def __str__(self) -> str:
         return f"{self.name} [{self.kind}]"
 
 
-class BankConnection(models.Model):
+class BankConnection(Described):
     """One consent at one bank (an Enable Banking session) or one Scalable Capital login.
 
     A Scalable connection keeps its credentials — the DPoP private key and the rotating refresh
@@ -274,6 +276,9 @@ class BankConnection(models.Model):
     # Credentials and polling state rotate constantly and must not pile up in history rows.
     provenance = ProvenanceField(excluded_fields=["secret", "token_expires_at", "token_lease_until", "link_poll_interval", "link_next_poll_at", "link_mfa_session_id"])
 
+    class Meta:
+        indexes = [GinIndex(fields=["stored_descriptors"], name="bank_conn_desc_gin", opclasses=["jsonb_path_ops"])]
+
     def __str__(self) -> str:
         return f"{self.aspsp_name} ({self.aspsp_country}) [{self.status}]"
 
@@ -284,7 +289,7 @@ def normalize_iban(iban: str | None) -> str | None:
     return cleaned or None
 
 
-class BankAccount(models.Model):
+class BankAccount(Described):
     """An account: its identity, and the history of every syncer and import that fed it.
 
     What reaches the account at a provider lives on its :class:`AccountSyncer` rows (one per
@@ -307,7 +312,7 @@ class BankAccount(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["organization", "import_key"], condition=models.Q(import_key__isnull=False), name="bank_acct_org_import_key"),
         ]
-        indexes = [models.Index(fields=["organization", "iban_normalized"], name="bank_acct_org_iban")]
+        indexes = [models.Index(fields=["organization", "iban_normalized"], name="bank_acct_org_iban"), GinIndex(fields=["stored_descriptors"], name="bank_acct_desc_gin", opclasses=["jsonb_path_ops"])]
 
     def save(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
         self.iban_normalized = normalize_iban(self.iban)
@@ -353,7 +358,7 @@ class AccountSyncer(models.Model):
         return f"{self.backend} {self.remote_id} → account {self.account_id}"
 
 
-class Category(EmbeddedDescriptionMixin, models.Model):
+class Category(EmbeddedDescriptionMixin, Described):
     """A spending or income category. Categories nest (groceries under food).
 
     A category's ``kind`` is always its root's: the whole subtree is expense, income or
@@ -382,7 +387,7 @@ class Category(EmbeddedDescriptionMixin, models.Model):
             models.UniqueConstraint(fields=["organization", "parent", "name"], name="bank_cat_org_parent_name", nulls_distinct=False),
             models.UniqueConstraint(fields=["organization", "key"], condition=models.Q(key__isnull=False), name="bank_cat_org_key"),
         ]
-        indexes = [*embedding_indexes("bank_cat")]
+        indexes = [*embedding_indexes("bank_cat"), GinIndex(fields=["stored_descriptors"], name="bank_cat_desc_gin", opclasses=["jsonb_path_ops"])]
 
     def __str__(self) -> str:
         return self.name
@@ -477,7 +482,7 @@ class CategoryRule(models.Model):
         return f"{self.field} {self.match} {self.pattern!r} → {self.category_id}"
 
 
-class StatementImport(models.Model):
+class StatementImport(Described):
     """One uploaded statement export (a Finanzguru file), previewed and then applied.
 
     Preview parses the file and matches every row against the accounts and their synced history
@@ -496,6 +501,9 @@ class StatementImport(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, help_text="When the file was previewed.")
     applied_at = models.DateTimeField(null=True, blank=True, help_text="When the import was (last) applied.")
     provenance = ProvenanceField()
+
+    class Meta:
+        indexes = [GinIndex(fields=["stored_descriptors"], name="bank_imp_desc_gin", opclasses=["jsonb_path_ops"])]
 
     def __str__(self) -> str:
         return f"{self.source} import {self.pk} [{self.status}]"
@@ -525,7 +533,7 @@ class ImportCategoryMapping(models.Model):
         return f"{self.main} / {self.sub} → {self.category_id}"
 
 
-class Transaction(EmbeddedDescriptionMixin, models.Model):
+class Transaction(EmbeddedDescriptionMixin, Described):
     """A single booked or pending transaction on an account.
 
     Counterparty, remittance and provider kind are embedded: similar transactions (the same
@@ -592,6 +600,7 @@ class Transaction(EmbeddedDescriptionMixin, models.Model):
             models.Index(fields=["account", "booking_date"], name="bank_tx_acct_date"),
             models.Index(fields=["category"], name="bank_tx_category"),
             models.Index(fields=["syncer", "booking_date"], name="bank_tx_syncer_date"),
+            GinIndex(fields=["stored_descriptors"], name="bank_tx_desc_gin", opclasses=["jsonb_path_ops"]),
         ]
 
     def __str__(self) -> str:
@@ -643,7 +652,7 @@ class HoldingSnapshot(models.Model):
         return f"{self.date} {self.isin} {self.quantity} = {self.valuation} {self.currency}"
 
 
-class Budget(models.Model):
+class Budget(Described):
     """A monthly spending limit for a category (and its children), in one currency."""
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_budgets", help_text="The organization this budget belongs to.")
@@ -655,11 +664,14 @@ class Budget(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, help_text="When the budget was created.")
     provenance = ProvenanceField()
 
+    class Meta:
+        indexes = [GinIndex(fields=["stored_descriptors"], name="bank_budget_desc_gin", opclasses=["jsonb_path_ops"])]
+
     def __str__(self) -> str:
         return f"{self.category_id}: {self.amount} {self.currency}/month"
 
 
-class RecurringPayment(models.Model):
+class RecurringPayment(Described):
     """A payment detected to repeat at a regular interval (rent, salary, a subscription)."""
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_recurring", help_text="The organization this belongs to.")
@@ -682,12 +694,13 @@ class RecurringPayment(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["account", "key", "currency"], name="bank_rec_acct_key_cur"),
         ]
+        indexes = [GinIndex(fields=["stored_descriptors"], name="bank_rec_desc_gin", opclasses=["jsonb_path_ops"])]
 
     def __str__(self) -> str:
         return f"{self.label} every {self.interval_days}d"
 
 
-class Merchant(EmbeddedDescriptionMixin, models.Model):
+class Merchant(EmbeddedDescriptionMixin, Described):
     """Someone the organization pays or is paid by — "Spar", "Wiener Linien", the landlord.
 
     Recognized on bank lines by its :class:`MerchantAlias` rows (see :mod:`finance.merchants`).
@@ -708,7 +721,7 @@ class Merchant(EmbeddedDescriptionMixin, models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["organization", "key"], name="bank_merch_org_key")]
-        indexes = [*embedding_indexes("bank_merch")]
+        indexes = [*embedding_indexes("bank_merch"), GinIndex(fields=["stored_descriptors"], name="bank_merch_desc_gin", opclasses=["jsonb_path_ops"])]
 
     def __str__(self) -> str:
         return self.name

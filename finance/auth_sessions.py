@@ -74,9 +74,12 @@ async def find(organization: "Organization", user: "User", state: str) -> models
 
 
 def _refuse(connection_id: int, message: str) -> None:
+    from bank_server.service import restore_connection  # it imports finance.models
+
     models.BankConnection.objects.filter(id=connection_id, status=models.ConnectionStatus.PENDING).update(
         status=models.ConnectionStatus.FAILED, last_error=message[:2000], last_error_code=models.BankErrorCode.LOGIN_REFUSED, secret=None, token_lease_until=None
     )
+    restore_connection(connection_id)
 
 
 async def complete(connection: models.BankConnection, code: str | None = None, error: str | None = None, error_description: str | None = None) -> AuthSession:
@@ -101,9 +104,12 @@ def resume(connection: models.BankConnection) -> AuthSession:
 
 
 def _cancel(connection_id: int) -> None:
+    from bank_server.service import restore_connection  # it imports finance.models
+
     models.BankConnection.objects.filter(id=connection_id, status=models.ConnectionStatus.PENDING).update(
         status=models.ConnectionStatus.CANCELLED, secret=None, token_expires_at=None, token_lease_until=None
     )
+    restore_connection(connection_id)
 
 
 async def cancel(connection: models.BankConnection) -> AuthSession:

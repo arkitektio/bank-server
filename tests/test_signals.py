@@ -99,6 +99,9 @@ def intake(settings):
     }
     yield server
     server.server.shutdown()
+    # Closed, not only stopped: a signal still queued for this intake is refused at once
+    # instead of holding the one sender thread until its timeout.
+    server.server.server_close()
 
 
 def _organization():
@@ -116,15 +119,31 @@ def test_the_manifest_lists_what_bank_hosts_with_its_descriptors():
     assert set(hosted) == set(EXPECTED)
     assert hosted["@bank/bankaccount"]["label"] == "Bank Account"
     assert {"key": "@bank/interval_days", "type": "INT", "description": "The days between two payments"} in hosted["@bank/recurringpayment"]["descriptors"]
-    assert hosted["@bank/merchant"]["descriptors"] == hosted["@bank/budget"]["descriptors"] == []
+    assert hosted["@bank/merchant"]["descriptors"] == [{"key": "@bank/online", "type": "BOOL", "description": "Whether it is online only, with no physical stores"}]
+    assert [(d["key"], d["type"]) for d in hosted["@bank/transaction"]["descriptors"]] == [
+        ("@bank/status", "STRING"),
+        ("@bank/kind", "STRING"),
+        ("@bank/currency", "STRING"),
+        ("@bank/direction", "STRING"),
+        ("@bank/is_transfer", "BOOL"),
+        ("@bank/categorized", "BOOL"),
+        ("@bank/has_merchant", "BOOL"),
+        ("@bank/has_security", "BOOL"),
+    ]
+    assert {"key": "@bank/capabilities", "type": "LIST"}.items() <= next(d for d in hosted["@bank/bankprovider"]["descriptors"] if d["key"] == "@bank/capabilities").items()
+    # A signal carries exactly the keys its structure declares (an account's sync, two more).
+    signals = {s["identifier"]: s["descriptors"] for s in service.manifest()["signals"]}
+    for identifier, structure in hosted.items():
+        keys = [d["key"] for d in structure["descriptors"]]
+        assert signals[identifier] == (keys if identifier != "@bank/bankaccount" else [*keys, "@bank/new_transactions", "@bank/updated_transactions"])
 
 
 def test_what_a_sync_brought_is_said_by_the_signal_not_by_the_account():
     manifest = service.manifest()
     account = next(s for s in manifest["structures"] if s["identifier"] == "@bank/bankaccount")
     signal = next(s for s in manifest["signals"] if s["identifier"] == "@bank/bankaccount")
-    assert [d["key"] for d in account["descriptors"]] == ["@bank/kind", "@bank/currency"]
-    assert signal["descriptors"] == ["@bank/kind", "@bank/currency", "@bank/new_transactions", "@bank/updated_transactions"]
+    assert [d["key"] for d in account["descriptors"]] == ["@bank/kind", "@bank/currency", "@bank/has_iban"]
+    assert signal["descriptors"] == ["@bank/kind", "@bank/currency", "@bank/has_iban", "@bank/new_transactions", "@bank/updated_transactions"]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -162,5 +181,5 @@ async def test_a_sync_is_one_account_signal_with_its_counts(intake, link, fakeba
     assert received["json"]["kind"] == "UPDATED"
     # The account's own descriptors, and what only the sync knows.
     carried = received["json"]["descriptors"]
-    assert set(carried) == {"@bank/kind", "@bank/currency", "@bank/new_transactions", "@bank/updated_transactions"}
+    assert set(carried) == {"@bank/kind", "@bank/currency", "@bank/has_iban", "@bank/new_transactions", "@bank/updated_transactions"}
     assert (carried["@bank/kind"], carried["@bank/currency"], carried["@bank/new_transactions"]) == ("CASH", "EUR", 2)

@@ -6,6 +6,7 @@ import strawberry
 from django.utils import timezone
 from kante.types import Info
 
+from bank_server.service import restore_transactions
 from finance import models, rules, types
 from finance.graphql.utils import get_many, get_or_404
 from finance.transfers import unpin
@@ -89,6 +90,8 @@ def categorize_transactions(info: Info, ids: list[strawberry.ID], category: Opti
         rows.update(category=target, category_source=models.CategorySource.MANUAL, updated_at=timezone.now())
     else:
         rows.update(category=None, category_source=models.CategorySource.NONE, updated_at=timezone.now())
+    restore_transactions(selected)  # before the rules, which stamp only the rows they categorize
+    if not category:
         rules.apply_rules(info.context.request.organization.id, models.Transaction.objects.filter(id__in=selected))
     return _in_order(info, ids)
 
@@ -100,4 +103,5 @@ def mark_transfers(info: Info, ids: list[strawberry.ID], is_transfer: Optional[b
         unpin(info.context.request.organization.id, selected)
     else:
         models.Transaction.objects.filter(id__in=selected).update(is_transfer=is_transfer, is_transfer_manual=True, updated_at=timezone.now())
+        restore_transactions(selected)
     return _in_order(info, ids)

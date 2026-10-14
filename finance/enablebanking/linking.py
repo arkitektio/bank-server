@@ -139,9 +139,11 @@ def _activate(connection_id: int, session: dict) -> models.BankConnection:
 
 
 def _fail(connection_id: int, error: Exception) -> models.BankConnection:
+    from bank_server.service import restore_connection  # it imports finance.models
     from finance.errors import code_for
 
     models.BankConnection.objects.filter(id=connection_id).update(status=models.ConnectionStatus.FAILED, last_error=str(error)[:2000], last_error_code=code_for(error), token_lease_until=None)
+    restore_connection(connection_id)
     return models.BankConnection.objects.get(id=connection_id)
 
 

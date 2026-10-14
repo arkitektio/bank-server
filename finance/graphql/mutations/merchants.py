@@ -14,6 +14,7 @@ from django.utils import timezone
 from kante.errors import NotFound, ValidationError
 from kante.types import Info
 
+from bank_server.service import restore_transactions
 from finance import enums, geocoding, merchants, models, types
 from finance.graphql.errors import translate
 from finance.graphql.utils import get_many, get_or_404
@@ -175,6 +176,7 @@ def create_merchant(info: Info, input: CreateMerchantInput) -> types.Merchant:
         loose = [tx.id for tx in seeds if not models.Transaction.objects.filter(id=tx.id, merchant=merchant).exists()]
         if loose:
             models.Transaction.objects.filter(id__in=loose).update(merchant=merchant, merchant_source=models.MerchantSource.MANUAL)
+            restore_transactions(loose)
             _refresh(organization.id, loose)
     return merchant  # type: ignore[return-value]
 
@@ -248,6 +250,7 @@ def delete_merchant(info: Info, id: strawberry.ID) -> strawberry.ID:
     with db_transaction.atomic():
         ids = merchants.organization_rows(organization_id, merchant.id)
         models.Transaction.objects.filter(id__in=ids).update(merchant=None, merchant_location=None, merchant_source=models.MerchantSource.NONE)
+        restore_transactions(ids)
         merchant.delete()
         _refresh(organization_id, ids)
     return id
@@ -432,6 +435,7 @@ def assign_merchant(info: Info, input: AssignMerchantInput) -> list[types.Transa
             models.Transaction.objects.filter(id__in=selected).update(merchant=target, merchant_location=place, merchant_source=models.MerchantSource.MANUAL)
         else:
             models.Transaction.objects.filter(id__in=selected).update(merchant=None, merchant_location=None, merchant_source=models.MerchantSource.NONE)
+        restore_transactions(selected)
         _refresh(organization_id, selected)
     order = {tx.id: i for i, tx in enumerate(rows)}
     return sorted(models.Transaction.objects.filter(id__in=selected), key=lambda tx: order[tx.id])  # type: ignore[return-value]

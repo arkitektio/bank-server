@@ -301,6 +301,7 @@ ANNOTATION_FIELDS = ["category", "category_source", "note", "is_transfer", "is_t
 
 def _write_account(account_id: int, rows: list[FgRow], mappings: dict[tuple[str, str], int | None], statement_import: models.StatementImport, result: Applied) -> list[int]:
     """Write one account's rows under its row lock; returns the ids of the rows written."""
+    from bank_server.service import service  # it imports finance.models
     from finance.semantic import embed_rows
 
     now = timezone.now()
@@ -347,10 +348,10 @@ def _write_account(account_id: int, rows: list[FgRow], mappings: dict[tuple[str,
             counts["created"] += 1
 
         embed_rows(to_create + reembed)
-        models.Transaction.objects.bulk_create(to_create)
-        models.Transaction.objects.bulk_update(
-            to_update, [*BANK_FIELDS, *ANNOTATION_FIELDS, "updated_at", *EMBEDDING_FIELDS] if reembed else [*ANNOTATION_FIELDS, "updated_at"], batch_size=500
-        )
+        # No pre_save sees a bulk write: the rows are described before they are written.
+        models.Transaction.objects.bulk_create(service.stamp(to_create))
+        written = [*BANK_FIELDS, *ANNOTATION_FIELDS, "updated_at", *EMBEDDING_FIELDS] if reembed else [*ANNOTATION_FIELDS, "updated_at"]
+        models.Transaction.objects.bulk_update(service.stamp(to_update), [*written, "stored_descriptors"], batch_size=500)
         result.balances += _balances(account, rows)
         for name, value in counts.items():
             setattr(result, name, getattr(result, name) + value)

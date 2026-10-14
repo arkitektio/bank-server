@@ -67,6 +67,8 @@ def matches(rule: models.CategoryRule, tx: models.Transaction) -> bool:
 
 def apply_rules(organization_id: int, transactions: QuerySet) -> int:
     """Categorize ``transactions`` by the organization's rules; returns how many rows changed."""
+    from bank_server.service import service  # it imports finance.models
+
     rules = list(models.CategoryRule.objects.filter(organization_id=organization_id, active=True).order_by("priority", "id"))
     changed = []
     # A user's choice and an imported statement's category are never a rule's to change.
@@ -81,5 +83,6 @@ def apply_rules(organization_id: int, transactions: QuerySet) -> int:
         if tx.category_id != category_id or tx.category_source != source:
             tx.category_id, tx.category_source = category_id, source
             changed.append(tx)
-    models.Transaction.objects.bulk_update(changed, ["category", "category_source"], batch_size=500)
+    # Whether a row is categorized is a descriptor: no pre_save sees a bulk write, so it is stamped.
+    models.Transaction.objects.bulk_update(service.stamp(changed), ["category", "category_source", "stored_descriptors"], batch_size=500)
     return len(changed)

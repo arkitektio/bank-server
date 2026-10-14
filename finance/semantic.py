@@ -184,6 +184,8 @@ def confident(suggestion: Suggestion) -> bool:
 
 def auto_assign(organization_id: int, transaction_ids: list[int]) -> int:
     """Give uncategorized transactions their confident top suggestion (source SEMANTIC); returns how many."""
+    from bank_server.service import service  # it imports finance.models
+
     if not conf()["auto_assign"] or not engine.enabled() or not transaction_ids:
         return 0
     rows = models.Transaction.objects.filter(
@@ -195,15 +197,19 @@ def auto_assign(organization_id: int, transaction_ids: list[int]) -> int:
         if suggestions and confident(suggestions[0]):
             tx.category_id, tx.category_source = suggestions[0].category.id, models.CategorySource.SEMANTIC
             changed.append(tx)
-    models.Transaction.objects.bulk_update(changed, ["category", "category_source"], batch_size=500)
+    models.Transaction.objects.bulk_update(service.stamp(changed), ["category", "category_source", "stored_descriptors"], batch_size=500)
     return len(changed)
 
 
 def reset_semantic(organization_id: int, transactions: QuerySet) -> int:
     """Hand SEMANTIC rows back to NONE (before re-running rules and assignment over them)."""
-    return transactions.filter(account__organization_id=organization_id, category_source=models.CategorySource.SEMANTIC).update(
-        category=None, category_source=models.CategorySource.NONE
-    )
+    from bank_server.service import restore_transactions
+
+    # The filter is what the update changes: the rows are known before it, to restore them after.
+    ids = list(transactions.filter(account__organization_id=organization_id, category_source=models.CategorySource.SEMANTIC).values_list("id", flat=True))
+    reset = models.Transaction.objects.filter(id__in=ids).update(category=None, category_source=models.CategorySource.NONE)
+    restore_transactions(ids)
+    return reset
 
 
 def categories_matching(organization_id: int, text: str) -> list[int]:

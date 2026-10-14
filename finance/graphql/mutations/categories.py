@@ -10,6 +10,7 @@ from django.utils import timezone
 from kante.errors import ValidationError
 from kante.types import Info
 
+from bank_server.service import restore_categories, restore_transactions
 from finance import enums, merchants, models, rules, semantic, taxonomy, types
 from finance.graphql.utils import get_many, get_or_404
 from finance.scoping import for_org
@@ -105,7 +106,9 @@ def update_category(info: Info, input: UpdateCategoryInput) -> types.Category:
     with db_transaction.atomic():
         _save_category(category)
         # A subtree is one kind: children follow a moved category or a changed root.
-        models.Category.objects.filter(id__in=_descendant_ids(category)).exclude(kind=category.kind).update(kind=category.kind)
+        followed = list(models.Category.objects.filter(id__in=_descendant_ids(category)).exclude(kind=category.kind).values_list("id", flat=True))
+        models.Category.objects.filter(id__in=followed).update(kind=category.kind)
+        restore_categories(followed)
     return category  # type: ignore[return-value]
 
 
@@ -148,6 +151,7 @@ def delete_category(info: Info, id: strawberry.ID, reassign_to: Optional[strawbe
             affected.update(category=target, category_source=models.CategorySource.MANUAL, updated_at=timezone.now())
         else:
             affected.update(category=None, category_source=models.CategorySource.NONE, updated_at=timezone.now())
+        restore_transactions(tx_ids)
         models.DismissedBaseCategory.objects.bulk_create([models.DismissedBaseCategory(organization_id=organization_id, key=key) for key in keys], ignore_conflicts=True)
         category.delete()
         if target is None and tx_ids:

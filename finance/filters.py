@@ -6,6 +6,7 @@
 
 import datetime
 from decimal import Decimal
+from enum import Enum
 
 import strawberry
 import strawberry_django
@@ -15,6 +16,7 @@ from kante.types import Info
 from embeddings import search
 from embeddings.search import hybrid_search
 from strawberry import auto
+from strawberry.scalars import JSON
 
 from finance import enums, geo, models, semantic
 from finance.scoping import for_org
@@ -29,9 +31,55 @@ def _ids(prefix: str, field: str, value: list[strawberry.ID]) -> Q:
     return Q(**{f"{prefix}{field}__in": value})
 
 
+# --- descriptors: a port's requires ------------------------------------------
+
+
+@strawberry.enum(description="How a descriptor constraint compares the object's value with the stated one. The operators a rekuest port's `requires` is written in, with the same meaning.")
+class DescriptorOperator(str, Enum):
+    """The comparison of one constraint."""
+
+    EQUALS = "EQUALS"
+    MATCHES = "MATCHES"
+    NOT_EQUALS = "NOT_EQUALS"
+    GTE = "GTE"
+    LTE = "LTE"
+    EXISTS = "EXISTS"
+    CONTAINS = "CONTAINS"
+    IN = "IN"
+    NOT_IN = "NOT_IN"
+
+
+@strawberry.input(
+    description=(
+        "One constraint on an object's descriptors, in the shape a rekuest port states its `requires` in -- so a picker hands a port's constraints on unchanged. "
+        "`key` is one of the keys the structure declares (e.g. `@bank/direction`); a key it does not declare is refused."
+    )
+)
+class DescriptorConstraintInput:
+    """One ``{key, operator, value}`` constraint."""
+
+    key: str = strawberry.field(description="The descriptor key, e.g. `@bank/direction`")
+    operator: DescriptorOperator = strawberry.field(description="How the object's value is compared with `value`. MATCHES is equality, as EQUALS is")
+    value: JSON | None = strawberry.field(default=None, description="The value compared against: a number for GTE and LTE, a list for IN and NOT_IN, true or false for EXISTS, the member looked for with CONTAINS")
+
+
+REQUIRES_DESCRIPTION = "Filter to the objects satisfying every one of these descriptor constraints: the `requires` of a port, handed on unchanged, so a picker offers what the port accepts. Answered from the stored descriptors, in one indexed query"
+
+
+def requires(model: type, value: list[DescriptorConstraintInput], prefix: str) -> Q:
+    """A port's ``requires`` on the stored descriptors of ``model``'s rows."""
+    from bank_server.service import service  # it imports the models this module filters
+
+    return service.requires(model, value, prefix)
+
+
 @strawberry_django.filter_type(models.BankConnection)
 class BankConnectionFilter:
     """Filtering options for bank connections."""
+
+    @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
+    def requires(self, value: list[DescriptorConstraintInput], prefix: str) -> Q:
+        return requires(models.BankConnection, value, prefix)
 
     @strawberry_django.filter_field
     def ids(self, value: list[strawberry.ID], prefix: str) -> Q:
@@ -53,6 +101,10 @@ class BankConnectionFilter:
 class BankProviderFilter:
     """Filtering options for providers."""
 
+    @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
+    def requires(self, value: list[DescriptorConstraintInput], prefix: str) -> Q:
+        return requires(models.BankProvider, value, prefix)
+
     @strawberry_django.filter_field
     def ids(self, value: list[strawberry.ID], prefix: str) -> Q:
         """Only these providers."""
@@ -72,6 +124,10 @@ class BankProviderFilter:
 @strawberry_django.filter_type(models.BankAccount)
 class BankAccountFilter:
     """Filtering options for bank accounts."""
+
+    @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
+    def requires(self, value: list[DescriptorConstraintInput], prefix: str) -> Q:
+        return requires(models.BankAccount, value, prefix)
 
     @strawberry_django.filter_field
     def ids(self, value: list[strawberry.ID], prefix: str) -> Q:
@@ -121,6 +177,10 @@ class NearInput:
 @strawberry_django.filter_type(models.Transaction)
 class TransactionFilter:
     """Filtering options for transactions."""
+
+    @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
+    def requires(self, value: list[DescriptorConstraintInput], prefix: str) -> Q:
+        return requires(models.Transaction, value, prefix)
 
     @strawberry_django.filter_field
     def ids(self, value: list[strawberry.ID], prefix: str) -> Q:
@@ -256,6 +316,10 @@ class TransactionFilter:
 class CategoryFilter:
     """Filtering options for categories."""
 
+    @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
+    def requires(self, value: list[DescriptorConstraintInput], prefix: str) -> Q:
+        return requires(models.Category, value, prefix)
+
     @strawberry_django.filter_field
     def ids(self, value: list[strawberry.ID], prefix: str) -> Q:
         """Only these categories."""
@@ -306,6 +370,10 @@ class CategoryRuleFilter:
 class BudgetFilter:
     """Filtering options for budgets."""
 
+    @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
+    def requires(self, value: list[DescriptorConstraintInput], prefix: str) -> Q:
+        return requires(models.Budget, value, prefix)
+
     @strawberry_django.filter_field
     def category(self, value: strawberry.ID, prefix: str) -> Q:
         """Only budgets of this category."""
@@ -321,6 +389,10 @@ class BudgetFilter:
 @strawberry_django.filter_type(models.RecurringPayment)
 class RecurringPaymentFilter:
     """Filtering options for recurring payments."""
+
+    @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
+    def requires(self, value: list[DescriptorConstraintInput], prefix: str) -> Q:
+        return requires(models.RecurringPayment, value, prefix)
 
     @strawberry_django.filter_field
     def accounts(self, value: list[strawberry.ID], prefix: str) -> Q:
@@ -380,6 +452,10 @@ class BudgetOrder:
 class MerchantFilter:
     """Filtering options for merchants."""
 
+    @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
+    def requires(self, value: list[DescriptorConstraintInput], prefix: str) -> Q:
+        return requires(models.Merchant, value, prefix)
+
     @strawberry_django.filter_field
     def ids(self, value: list[strawberry.ID], prefix: str) -> Q:
         """Only these merchants."""
@@ -408,6 +484,20 @@ class MerchantFilter:
         distance = geo.nearest_location_meters(value.latitude, value.longitude)
         queryset = queryset.annotate(_distance_meters=distance).order_by(F("_distance_meters").asc(nulls_last=True), "pk")
         return queryset, Q(_distance_meters__lte=value.radius_meters)
+
+
+@strawberry_django.filter_type(models.StatementImport)
+class StatementImportFilter:
+    """Filtering options for statement imports."""
+
+    @strawberry_django.filter_field
+    def ids(self, value: list[strawberry.ID], prefix: str) -> Q:
+        """Only these imports."""
+        return _ids(prefix, "id", value)
+
+    @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
+    def requires(self, value: list[DescriptorConstraintInput], prefix: str) -> Q:
+        return requires(models.StatementImport, value, prefix)
 
 
 @strawberry_django.filter_type(models.MerchantLocation)
