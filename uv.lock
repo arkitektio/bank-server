@@ -302,7 +302,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "aioredis", specifier = ">=2.0.1,<3" },
-    { name = "arkitekt-service", specifier = ">=4.0.0" },
+    { name = "arkitekt-service", specifier = ">=6.0.0" },
     { name = "authentikate", specifier = ">=5.0.0" },
     { name = "boto3", specifier = ">=1.38.9" },
     { name = "channels-redis", specifier = ">=4.1.0,<5" },
