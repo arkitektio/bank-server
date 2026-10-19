@@ -36,8 +36,8 @@ def hooked(settings):
         "PRIVATE_KEY": BANK_KEY.as_pem(private=True).decode(),
         "TRUST_JWKS": {
             "keys": [
-                {**trust.public_jwk(BANK_KEY), "service": "live.arkitekt.bank"},
-                {**trust.public_jwk(REKUEST_KEY), "service": "live.arkitekt.rekuest"},
+                {**trust.public_jwk(BANK_KEY), "service": "bank"},
+                {**trust.public_jwk(REKUEST_KEY), "service": "rekuest"},
             ]
         },
     }
@@ -46,7 +46,7 @@ def hooked(settings):
 
 def _signed(body: bytes, agent: str = "17", *, method: str = "POST", path: str = "/_rekuest/hook", key=REKUEST_KEY) -> dict:
     """Headers of a request rekuest sends: a service JWT from rekuest's key, for bank."""
-    authorization = trust.sign(method, path, body, issuer="live.arkitekt.rekuest", audience="live.arkitekt.bank", key=key)
+    authorization = trust.sign(method, path, body, issuer="rekuest", audience="bank", key=key)
     return {"Authorization": authorization, "X-Rekuest-Agent": agent}
 
 
@@ -55,6 +55,7 @@ def test_the_action_is_offered_and_wired_to_nothing():
         "interface": "sync_all_accounts",
         "name": "Sync all bank accounts",
         "description": "Sync every active bank account of the organization that has sync budget to spare, unattended.",
+        "args": [],
     }
 
 

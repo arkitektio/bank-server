@@ -33,7 +33,7 @@ hub:
             crv: Ed25519
             kid: HlfV1uEsP7TtfrXImnXtNMBviddcc45GyqUplxklw88
             kty: OKP
-            service: live.arkitekt.rekuest
+            service: rekuest
             use: sig
             x: Qiqm2giUwSYaM4Ow_iR3clNG-liHEX74EQw5sGSYoVI
         kind: jwks_dict
@@ -70,106 +70,106 @@ instance:
         crv: Ed25519
         kid: HlfV1uEsP7TtfrXImnXtNMBviddcc45GyqUplxklw88
         kty: OKP
-        service: live.arkitekt.rekuest
+        service: rekuest
         use: sig
         x: Qiqm2giUwSYaM4Ow_iR3clNG-liHEX74EQw5sGSYoVI
       - alg: Ed25519
         crv: Ed25519
         kid: H3SkgkYNXDiZUtcIbUfT4nd5pQS3n6yXha-RZ-f_6yk
         kty: OKP
-        service: live.arkitekt.kabinet
+        service: kabinet
         use: sig
         x: MKzCwHgxNpMPG-8SF755-yWDWd4B7ojfDX36Ishujog
       - alg: Ed25519
         crv: Ed25519
         kid: KYAlWaKZdARPfu-mtBqXgTgH2qHswDT9El70b45K2yk
         kty: OKP
-        service: live.arkitekt.mikro
+        service: mikro
         use: sig
         x: FY96f6kQkfMHXdDx5ib0hFkkwW5tfhqp7sagG-xjewE
       - alg: Ed25519
         crv: Ed25519
         kid: YN4vjcPblTDgoT7xI-5-MQqji0pVUBHYOcRvVvkHm70
         kty: OKP
-        service: live.arkitekt.fluss
+        service: fluss
         use: sig
         x: FDcS8Vjc1iX5b1uVgLMP3KgHUTI3Kaq9rk6DWnQZIGo
       - alg: Ed25519
         crv: Ed25519
         kid: UQr8c1KUx-_Jdj-e55VaIn4cGcEjWPDIL5M9_ADS7OM
         kty: OKP
-        service: live.arkitekt.kraph
+        service: kraph
         use: sig
         x: OOSGfk7BLGWhCDjjD0hQpWyHYrz4AD8Txu5aFs2Tkk4
       - alg: Ed25519
         crv: Ed25519
         kid: 0gj3Y10aXB3vz7BrP8FBi--9G3bMKmnPp2isHtWcJ_8
         kty: OKP
-        service: live.arkitekt.bank
+        service: bank
         use: sig
         x: Hd9vxovL2TWG60N3QfYJBNwDEQQrAF-754DLx3l6Kq0
       - alg: Ed25519
         crv: Ed25519
         kid: e4FPItneaZelUMmoLJff0zx_jTtlXlLWDwbAkmB4PxY
         kty: OKP
-        service: live.arkitekt.kuvert
+        service: kuvert
         use: sig
         x: cBVEbvJq4FiwZHWHt9Vj1ozj-wOIXiDLZTimFBNj8FU
       - alg: Ed25519
         crv: Ed25519
         kid: rL6Uw-TEA2tB88VoyjCige5qe0iEUPYa1QE-Dsn7NIA
         kty: OKP
-        service: live.arkitekt.dokuments
+        service: dokuments
         use: sig
         x: 8EVk4y5BrT2aLA2wBm9VYDWQTOxDZkB4FnsutH5FMis
       - alg: Ed25519
         crv: Ed25519
         kid: qN20TpXPMOUHeC8t0dGR4TnwkjjXHzIW2ygWKHAAwqo
         kty: OKP
-        service: live.arkitekt.lokate
+        service: lokate
         use: sig
         x: POhFN7iS46yL1yYv7xVZaTwxeHleRhs_ko2rkFSzVbU
 secrets:
   fernet: /secrets/bank.fernet
 peers:
   rekuest:
-    identifier: live.arkitekt.rekuest
+    identifier: rekuest
     url: http://rekuest:80/rekuest
     offers:
       agent: http://rekuest-takt:8080/rekuest
   kabinet:
-    identifier: live.arkitekt.kabinet
+    identifier: kabinet
     url: http://kabinet:80/kabinet
     offers:
       rekuest_hook: http://kabinet:80/kabinet/_rekuest/hook
       rekuest_service: http://kabinet:80/kabinet/_rekuest/service
   mikro:
-    identifier: live.arkitekt.mikro
+    identifier: mikro
     url: http://mikro:80/mikro
     offers:
       rekuest_hook: http://mikro:80/mikro/_rekuest/hook
       rekuest_service: http://mikro:80/mikro/_rekuest/service
   fluss:
-    identifier: live.arkitekt.fluss
+    identifier: fluss
     url: http://fluss:80/fluss
     offers:
       rekuest_hook: http://fluss:80/fluss/_rekuest/hook
       rekuest_service: http://fluss:80/fluss/_rekuest/service
   kraph:
-    identifier: live.arkitekt.kraph
+    identifier: kraph
     url: http://kraph:80/kraph
     offers: {}
   kuvert:
-    identifier: live.arkitekt.kuvert
+    identifier: kuvert
     url: http://kuvert:80/kuvert
     offers:
       rekuest_hook: http://kuvert:80/kuvert/_rekuest/hook
       rekuest_service: http://kuvert:80/kuvert/_rekuest/service
   dokuments:
-    identifier: live.arkitekt.dokuments
+    identifier: dokuments
     url: http://dokuments:80/dokuments
     offers: {}
   lokate:
-    identifier: live.arkitekt.lokate
+    identifier: lokate
     url: http://lokate:80/lokate
     offers: {}
