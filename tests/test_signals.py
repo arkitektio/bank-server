@@ -118,8 +118,8 @@ def test_the_manifest_lists_what_bank_hosts_with_its_descriptors():
     hosted = {s["identifier"]: s for s in service.manifest()["structures"]}
     assert set(hosted) == set(EXPECTED)
     assert hosted["@bank/bankaccount"]["label"] == "Bank Account"
-    assert {"key": "@bank/interval_days", "type": "INT", "description": "The days between two payments"} in hosted["@bank/recurringpayment"]["descriptors"]
-    assert hosted["@bank/merchant"]["descriptors"] == [{"key": "@bank/online", "type": "BOOL", "description": "Whether it is online only, with no physical stores"}]
+    assert {"key": "@bank/interval_days", "type": "INT", "description": "The number of days between two payments"} in hosted["@bank/recurringpayment"]["descriptors"]
+    assert hosted["@bank/merchant"]["descriptors"] == [{"key": "@bank/online", "type": "BOOL", "description": "Whether it is an online shop only, with no physical stores"}]
     assert [(d["key"], d["type"]) for d in hosted["@bank/transaction"]["descriptors"]] == [
         ("@bank/status", "STRING"),
         ("@bank/kind", "STRING"),

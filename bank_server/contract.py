@@ -24,57 +24,57 @@ UPDATED_TRANSACTIONS = "@bank/updated_transactions"
 
 #: Money in or out, from the sign of the amount: OUT when it is negative, IN otherwise (zero
 #: included: no money left the account). A category rule's IN and OUT match neither for zero.
-_DIRECTION = Descriptor(key="@bank/direction", type="STRING", description="Whether the money comes in or goes out: IN (zero or positive amount) or OUT (negative amount)")
-_CURRENCY = Descriptor(key="@bank/currency", type="STRING", description="Its currency (ISO 4217), empty when unknown")
+_DIRECTION = Descriptor(key="@bank/direction", type="STRING", description="Whether the money comes in or goes out of the account: IN (money received; zero or positive amount) or OUT (money paid; negative amount)")
+_CURRENCY = Descriptor(key="@bank/currency", type="STRING", description="Its currency as an ISO 4217 code (EUR, USD, …), empty when unknown")
 
 CONNECTION_DESCRIPTORS = [
-    Descriptor(key="@bank/status", type="STRING", description="Where the consent is: PENDING, ACTIVE, EXPIRED, REVOKED, FAILED or CANCELLED"),
-    Descriptor(key="@bank/provider", type="STRING", description="The provider the bank is reached through"),
+    Descriptor(key="@bank/status", type="STRING", description="Where the bank consent is: PENDING (waiting for approval at the bank), ACTIVE, EXPIRED, REVOKED, FAILED or CANCELLED"),
+    Descriptor(key="@bank/provider", type="STRING", description="The provider the bank is reached through: ENABLEBANKING (an online banking consent) or SCALABLE (a Scalable Capital login)"),
     Descriptor(key="@bank/country", type="STRING", description="The bank's ISO country code, empty when none"),
-    Descriptor(key="@bank/link_step", type="STRING", description="Where a login is: DEVICE, MFA or DONE, empty for a consent that has no steps"),
+    Descriptor(key="@bank/link_step", type="STRING", description="Where a broker login is: DEVICE (waiting for the login code), MFA (waiting for the second factor) or DONE, empty for a consent that has no steps"),
     Descriptor(key="@bank/error_code", type="STRING", description="The kind of the last error (a BankErrorCode such as CONSENT_EXPIRED), empty when there was none"),
 ]
 PROVIDER_DESCRIPTORS = [
-    Descriptor(key="@bank/provider", type="STRING", description="The kind of provider"),
-    Descriptor(key="@bank/enabled", type="BOOL", description="Whether it starts links and syncs"),
+    Descriptor(key="@bank/provider", type="STRING", description="The kind of provider: ENABLEBANKING (open banking) or SCALABLE (Scalable Capital)"),
+    Descriptor(key="@bank/enabled", type="BOOL", description="Whether it is switched on: it starts new bank links and syncs"),
     Descriptor(
         key="@bank/capabilities",
         type="LIST",
-        description="What is switched on (TRANSACTIONS, BALANCES, HOLDINGS, PRICES, SCHEDULED_SYNC): HOLDINGS for a depot's positions",
+        description="What is switched on (TRANSACTIONS, BALANCES, HOLDINGS, PRICES, SCHEDULED_SYNC): HOLDINGS for a depot's positions, PRICES for security prices",
     ),
 ]
 ACCOUNT_DESCRIPTORS = [
-    Descriptor(key="@bank/kind", type="STRING", description="What the account holds: CASH, DEPOT or SAVINGS"),
+    Descriptor(key="@bank/kind", type="STRING", description="What the account holds: CASH (checking, card or clearing account), DEPOT (securities) or SAVINGS"),
     _CURRENCY,
-    Descriptor(key="@bank/has_iban", type="BOOL", description="Whether its IBAN is known"),
+    Descriptor(key="@bank/has_iban", type="BOOL", description="Whether its IBAN (the international bank account number) is known"),
 ]
 IMPORT_DESCRIPTORS = [
-    Descriptor(key="@bank/status", type="STRING", description="Where the import is: PREVIEWED, APPLIED or FAILED"),
-    Descriptor(key="@bank/source", type="STRING", description="The app or format the statement came from"),
+    Descriptor(key="@bank/status", type="STRING", description="Where the statement import is: PREVIEWED (parsed, nothing written yet), APPLIED or FAILED"),
+    Descriptor(key="@bank/source", type="STRING", description="The app or file format the statement export came from (FINANZGURU)"),
 ]
 RECURRING_DESCRIPTORS = [
-    Descriptor(key="@bank/status", type="STRING", description="How a user judged it: DETECTED (not reviewed yet), CONFIRMED or IGNORED"),
-    Descriptor(key="@bank/interval_days", type="INT", description="The days between two payments"),
+    Descriptor(key="@bank/status", type="STRING", description="How a user judged the recurring payment: DETECTED (not reviewed yet), CONFIRMED or IGNORED"),
+    Descriptor(key="@bank/interval_days", type="INT", description="The number of days between two payments"),
     _CURRENCY,
     _DIRECTION,
 ]
 CATEGORY_DESCRIPTORS = [
-    Descriptor(key="@bank/kind", type="STRING", description="Whether its money is an expense, income or a transfer"),
+    Descriptor(key="@bank/kind", type="STRING", description="Whether its money is an expense, income or a transfer between own accounts"),
     Descriptor(key="@bank/custom", type="BOOL", description="Whether the organization made it (true) or it is a base category of the taxonomy (false)"),
 ]
 MERCHANT_DESCRIPTORS = [
-    Descriptor(key="@bank/online", type="BOOL", description="Whether it is online only, with no physical stores"),
+    Descriptor(key="@bank/online", type="BOOL", description="Whether it is an online shop only, with no physical stores"),
 ]
 BUDGET_DESCRIPTORS = [_CURRENCY]
 TRANSACTION_DESCRIPTORS = [
-    Descriptor(key="@bank/status", type="STRING", description="Its booking status at the bank: BOOK, PDNG (pending) or OTHR"),
-    Descriptor(key="@bank/kind", type="STRING", description="The provider's transaction type (BUY, SELL, DEPOSIT, …), empty for a plain bank transaction"),
+    Descriptor(key="@bank/status", type="STRING", description="Its booking status at the bank: BOOK (booked), PDNG (pending) or OTHR"),
+    Descriptor(key="@bank/kind", type="STRING", description="The broker's transaction type (BUY, SELL, DEPOSIT, …), empty for a plain bank transaction"),
     _CURRENCY,
     _DIRECTION,
     Descriptor(key="@bank/is_transfer", type="BOOL", description="Whether it moves money between the organization's own accounts (left out of stats)"),
-    Descriptor(key="@bank/categorized", type="BOOL", description="Whether it has a category"),
-    Descriptor(key="@bank/has_merchant", type="BOOL", description="Whether it is linked to a merchant"),
-    Descriptor(key="@bank/has_security", type="BOOL", description="Whether it trades or pays out a security (its ISIN is known)"),
+    Descriptor(key="@bank/categorized", type="BOOL", description="Whether it has a category (groceries, rent, salary, …)"),
+    Descriptor(key="@bank/has_merchant", type="BOOL", description="Whether it is linked to a merchant (the shop or payee)"),
+    Descriptor(key="@bank/has_security", type="BOOL", description="Whether it trades or pays out a security such as a stock or ETF (its ISIN is known)"),
 ]
 
 
@@ -89,55 +89,55 @@ HOSTS = Hosts(
         Structure(
             identifier="@bank/bankconnection",
             label="Bank Connection",
-            description="One consent at one bank, through which its accounts are synced.",
+            description="One consent at one bank: the online banking link (or Scalable Capital login) through which its accounts, balances and transactions are synced.",
             descriptors=CONNECTION_DESCRIPTORS,
         ),
         Structure(
             identifier="@bank/bankprovider",
             label="Bank Provider",
-            description="A provider an organization set up (an Enable Banking application, Scalable Capital), through which banks are linked.",
+            description="A provider an organization set up (an Enable Banking open banking application, Scalable Capital), through which banks are linked and their accounts synced.",
             descriptors=PROVIDER_DESCRIPTORS,
         ),
         Structure(
             identifier="@bank/bankaccount",
             label="Bank Account",
-            description="A bank account, with its history across relinks.",
+            description="A bank account (checking, card, savings or securities depot) with its IBAN, balances and transaction history, kept across relinks.",
             descriptors=ACCOUNT_DESCRIPTORS,
         ),
         Structure(
             identifier="@bank/statementimport",
-            label="Statement Import",
-            description="An uploaded statement export and what importing it did.",
+            label="Bank Statement Import",
+            description="An uploaded bank statement export (a Finanzguru file, xlsx or CSV) and what importing its transactions did.",
             descriptors=IMPORT_DESCRIPTORS,
         ),
         Structure(
             identifier="@bank/recurringpayment",
             label="Recurring Payment",
-            description="A payment that repeats at a regular interval on an account.",
+            description="A payment that repeats at a regular interval on an account, detected from its transactions: rent, salary, a subscription or a standing order.",
             descriptors=RECURRING_DESCRIPTORS,
         ),
         Structure(
             identifier="@bank/category",
             label="Category",
-            description="A spending or income category.",
+            description="A spending or income category that sorts transactions (groceries, rent, salary): expense, income or transfer, nested under a parent category.",
             descriptors=CATEGORY_DESCRIPTORS,
         ),
         Structure(
             identifier="@bank/merchant",
             label="Merchant",
-            description="Someone the organization pays or is paid by.",
+            description="Someone the organization pays or is paid by: a shop, company or person (the payee or payer), recognized on the bank's transaction lines.",
             descriptors=MERCHANT_DESCRIPTORS,
         ),
         Structure(
             identifier="@bank/budget",
             label="Budget",
-            description="A monthly spending limit for a category.",
+            description="A monthly spending limit for a category (and its subcategories), in one currency.",
             descriptors=BUDGET_DESCRIPTORS,
         ),
         Structure(
             identifier="@bank/transaction",
             label="Transaction",
-            description="A booked or pending transaction on an account.",
+            description="A booked or pending transaction on an account: one payment, transfer or booking of money in or out, with its counterparty, category and merchant.",
             descriptors=TRANSACTION_DESCRIPTORS,
         ),
     ],
@@ -146,55 +146,55 @@ HOSTS = Hosts(
             identifier="@bank/bankconnection",
             kinds=["CREATED", "UPDATED"],
             descriptors=_keys(CONNECTION_DESCRIPTORS),
-            description="A bank link was started, completed, expired, revoked, refused or cancelled.",
+            description="A bank link (a consent at a bank) was started, completed, expired, revoked, refused or cancelled.",
         ),
         Signal(
             identifier="@bank/bankprovider",
             kinds=["CREATED", "UPDATED", "DELETED"],
             descriptors=_keys(PROVIDER_DESCRIPTORS),
-            description="A provider was set up, changed (enabled, its capabilities, its key) or removed.",
+            description="A bank provider was set up, changed (enabled, its capabilities, its key) or removed.",
         ),
         Signal(
             identifier="@bank/bankaccount",
             kinds=["CREATED", "UPDATED"],
             descriptors=[*_keys(ACCOUNT_DESCRIPTORS), NEW_TRANSACTIONS, UPDATED_TRANSACTIONS],
-            description="A bank account appeared, changed, or was synced (then with the number of new and updated transactions).",
+            description="A bank account appeared, changed, or was synced with its bank (then with the number of new and updated transactions).",
         ),
         Signal(
             identifier="@bank/statementimport",
             kinds=["CREATED", "UPDATED"],
             descriptors=_keys(IMPORT_DESCRIPTORS),
-            description="A statement import was created or changed status.",
+            description="A bank statement import was uploaded or changed status (previewed, applied, failed).",
         ),
         Signal(
             identifier="@bank/recurringpayment",
             kinds=["CREATED", "UPDATED"],
             descriptors=_keys(RECURRING_DESCRIPTORS),
-            description="A recurring payment was detected or reviewed.",
+            description="A recurring payment (a subscription, standing order, rent or salary) was detected or reviewed.",
         ),
         Signal(
             identifier="@bank/category",
             kinds=["CREATED", "UPDATED", "DELETED"],
             descriptors=_keys(CATEGORY_DESCRIPTORS),
-            description="A category was created, changed or deleted.",
+            description="A transaction category was created, changed or deleted.",
         ),
         Signal(
             identifier="@bank/merchant",
             kinds=["CREATED", "UPDATED", "DELETED"],
             descriptors=_keys(MERCHANT_DESCRIPTORS),
-            description="A merchant was created, changed or deleted.",
+            description="A merchant (a shop or payee) was created, changed or deleted.",
         ),
         Signal(
             identifier="@bank/budget",
             kinds=["CREATED", "UPDATED", "DELETED"],
             descriptors=_keys(BUDGET_DESCRIPTORS),
-            description="A budget was created, changed or deleted.",
+            description="A monthly spending budget was created, changed or deleted.",
         ),
         Signal(
             identifier="@bank/transaction",
             kinds=["UPDATED"],
             descriptors=_keys(TRANSACTION_DESCRIPTORS),
-            description="A transaction was edited (categorized, marked as a transfer, …).",
+            description="A transaction was edited by a user (categorized, marked as a transfer, …).",
         ),
     ],
 )
