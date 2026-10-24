@@ -553,7 +553,7 @@ def datalayer(backend_stack):
     from botocore.config import Config
     from django.conf import settings
 
-    import datalayer.datalayer as dl_module
+    import arkitekt_datalayer.datalayer as dl_module
 
     settings.DATALAYER = {**settings.DATALAYER, "access_key": "banktestroot", "secret_key": "banktestrootsecret", "port": backend_stack.rustfs_port}
     dl_module.GLOBAL_DL = None

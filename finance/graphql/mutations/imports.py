@@ -11,8 +11,8 @@ from django.conf import settings
 from kante.errors import KanteError, ValidationError
 from kante.types import Info
 
-from datalayer import models as dl_models
-from datalayer.datalayer import get_current_datalayer
+from arkitekt_datalayer import models as dl_models
+from arkitekt_datalayer.datalayer import get_current_datalayer
 from finance import models
 from finance.graphql.utils import get_or_404
 from finance.imports import apply as importing

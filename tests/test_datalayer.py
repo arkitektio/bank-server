@@ -5,7 +5,7 @@ import pytest
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from datalayer import models as dl_models
+from arkitekt_datalayer import models as dl_models
 
 from .conftest import REQUEST_UPLOAD
 

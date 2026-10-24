@@ -14,7 +14,6 @@ banks are linked through (``admin_mutation``).
 
 import strawberry
 import strawberry_django
-from django.conf import settings
 from strawberry.schema.config import StrawberryConfig
 from authentikate.strawberry.directives import AuthExtension, AuthSubscribeExtension
 from authentikate.strawberry.extension import AuthentikateExtension
@@ -22,9 +21,9 @@ from koherent.strawberry.extension import KoherentExtension
 from strawberry_django.optimizer import DjangoOptimizerExtension
 
 from bank_server.logs import QuietErrorsSchema
-from datalayer import mutations as datalayer_mutations
-from datalayer import scalars as datalayer_scalars
-from datalayer.datalayer import DatalayerConfig
+from arkitekt_datalayer import mutations as datalayer_mutations
+from arkitekt_datalayer import scalars as datalayer_scalars
+from arkitekt_datalayer.datalayer import load_config
 from finance import types
 from finance.types import imports as import_types
 from finance.types import insights as insight_types
@@ -48,7 +47,7 @@ def upload_mutation(**kwargs):  # noqa: ANN201
     Holding any one of the configured roles is enough. Read once, at schema build -- a change to
     the config takes a restart, like every other setting.
     """
-    roles = DatalayerConfig(**getattr(settings, "DATALAYER", {})).upload_roles
+    roles = load_config().upload_roles
     return strawberry_django.mutation(extensions=[AuthExtension(any_role_of=roles)], **kwargs)
 
 
@@ -184,7 +183,7 @@ class Mutation:
     set_recurring_status = mutation(resolver=mutations.set_recurring_status, description="Confirm or ignore a recurring payment.")
     set_recurring_statuses = mutation(resolver=mutations.set_recurring_statuses, description="Confirm or ignore many recurring payments at once.")
 
-    # Uploads (the vendored datalayer): request a grant, write the file to S3, finish, then import it.
+    # Uploads (the datalayer): request a grant, write the file to S3, finish, then import it.
     request_bigfile_upload = upload_mutation(resolver=datalayer_mutations.request_bigfile_upload, description="Request temporary S3 credentials to upload one file (e.g. a statement export to import).")
     finish_bigfile_upload = upload_mutation(resolver=datalayer_mutations.finish_bigfile_upload, description="Finalize a file upload after the client has written the object.")
     request_bigfile_access = mutation(resolver=datalayer_mutations.request_bigfile_access, description="Request temporary S3 read credentials for an uploaded file.")

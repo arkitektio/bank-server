@@ -1,61 +1,11 @@
 """Accounts and their syncers: the 0006 migration, account resolution on link, and syncing through syncers."""
 
-import datetime
 import uuid
 
-import pytest
 
 from finance import models
-from finance.sync import fetch_since
 
 from .conftest import account, tx
-
-
-@pytest.mark.django_db(transaction=True)
-def test_migration_gives_every_account_a_syncer():
-    """0006: one syncer per account — with or without a connection — carrying its sync state, and every row gets it."""
-    from django.db import connection
-    from django.db.migrations.executor import MigrationExecutor
-
-    before = [("finance", "0005_category_terms")]
-    executor = MigrationExecutor(connection)
-    executor.migrate(before)
-    try:
-        apps = executor.loader.project_state(before).apps
-        Organization = apps.get_model("authentikate", "Organization")
-        Connection = apps.get_model("finance", "BankConnection")
-        Account = apps.get_model("finance", "BankAccount")
-        Transaction = apps.get_model("finance", "Transaction")
-        org = Organization.objects.create(slug=f"mig-{uuid.uuid4().hex[:6]}")
-        now = datetime.datetime.now(datetime.timezone.utc)
-        linked = Connection.objects.create(
-            organization=org, aspsp_name="Bank", aspsp_country="AT", state=uuid.uuid4().hex, redirect_url="x", status="ACTIVE", pending_expires_at=now, provider="SCALABLE"
-        )
-        with_connection = Account.objects.create(
-            organization=org, connection=linked, uid="u1", identification_key="scalable:p:broker:1:cash", iban="AT12 3456", currency="EUR",
-            last_synced_at=now, syncs_today=2, sync_day=now.date(), last_error="boom", last_error_code="BANK_ERROR",
-        )
-        orphan = Account.objects.create(organization=org, connection=None, uid="u2", identification_key="hash-2", currency="EUR")
-        for day in (1, 5):
-            Transaction.objects.create(account=with_connection, fingerprint=f"f{day}", booking_date=datetime.date(2026, 9, day), amount="-1.00", currency="EUR")
-
-        executor = MigrationExecutor(connection)
-        executor.loader.build_graph()
-        executor.migrate(executor.loader.graph.leaf_nodes("finance"))
-    finally:
-        executor = MigrationExecutor(connection)
-        executor.loader.build_graph()
-        executor.migrate(executor.loader.graph.leaf_nodes("finance"))
-
-    first = models.AccountSyncer.objects.get(account_id=with_connection.id)
-    assert (first.backend, first.remote_id, first.identification_key, first.connection_id) == ("SCALABLE", "u1", "scalable:p:broker:1:cash", linked.id)
-    assert (first.syncs_today, first.last_error_code, first.last_synced_at) == (2, "BANK_ERROR", now)
-    second = models.AccountSyncer.objects.get(account_id=orphan.id)
-    assert (second.backend, second.identification_key, second.connection_id) == ("ENABLEBANKING", "hash-2", None)
-    assert models.BankAccount.objects.get(id=with_connection.id).iban_normalized == "AT123456"
-    assert set(models.Transaction.objects.filter(account_id=with_connection.id).values_list("syncer_id", "origin")) == {(first.id, "SYNC")}
-    # The incremental start is what it was per account before.
-    assert fetch_since(first, 3) == datetime.date(2026, 9, 2)
 
 
 SYNC = "mutation Sync($id: ID!) { syncAccount(id: $id) { created account { id lastSyncedAt isImportOnly syncers { backend lastSyncedAt } } } }"

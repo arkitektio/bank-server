@@ -56,7 +56,7 @@ INSTALLED_APPS = [
     "channels",
     "django_probes",
     "polymorphic",
-    "datalayer",
+    "arkitekt_datalayer",
     "finance",
     "health_check",  # required for health checks
     "health_check.db",  # stock Django health checkers
@@ -185,7 +185,7 @@ ENABLEBANKING = conf.enablebanking.model_dump()
 SCALABLE = conf.scalable.model_dump()
 BANK_SYNC = conf.sync.model_dump()
 BANK_IMPORTS = conf.imports.model_dump()
-# The vendored datalayer reads only this; empty without a `datalayer` block (uploads then answer NOT_CONFIGURED).
+# The datalayer (arkitekt_datalayer) reads only this; empty without a `datalayer` block (uploads then answer NOT_CONFIGURED).
 DATALAYER = conf.datalayer.model_dump(exclude_none=True) if conf.datalayer else {}
 
 # Semantic search and categorization (the vendored ``embeddings`` package, as in rekuest, mikro

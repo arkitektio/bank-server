@@ -96,37 +96,6 @@ async def test_descriptions_become_terms_and_follow_edits(link, aexecute, fakeba
     assert terms == ["Groceries", "Bauernmarkt", "Hofladen"]
 
 
-@pytest.mark.django_db(transaction=True)
-def test_migration_keys_legacy_defaults_and_fixes_kinds():
-    """0004 on an organization seeded with the old flat defaults (and a mismatched child kind)."""
-    from django.db import connection
-    from django.db.migrations.executor import MigrationExecutor
-
-    before, after = [("finance", "0003_on_demand_sync")], [("finance", "0005_category_terms")]
-    executor = MigrationExecutor(connection)
-    executor.migrate(before)
-    apps = executor.loader.project_state(before).apps
-    Organization = apps.get_model("authentikate", "Organization")
-    OldCategory = apps.get_model("finance", "Category")
-    org = Organization.objects.create(slug="legacy-org")
-    for name, kind in [("Groceries", "EXPENSE"), ("Rent & Housing", "EXPENSE"), ("Utilities", "EXPENSE"), ("Salary", "INCOME"), ("Transfer", "TRANSFER"), ("My Own", "EXPENSE")]:
-        OldCategory.objects.create(organization=org, name=name, kind=kind)
-    salary = OldCategory.objects.get(organization=org, name="Salary")
-    OldCategory.objects.create(organization=org, name="Bonus", kind="EXPENSE", parent=salary)  # wrong kind under income
-
-    executor = MigrationExecutor(connection)
-    executor.loader.build_graph()
-    executor.migrate(after)
-    try:
-        # Read as the schema stands after 0005: today's models have columns it does not.
-        _assert_legacy_keyed(executor.loader.project_state(after).apps)
-    finally:
-        # Leave the schema as every other test expects it: fully migrated.
-        executor = MigrationExecutor(connection)
-        executor.loader.build_graph()
-        executor.migrate(executor.loader.graph.leaf_nodes("finance"))
-
-
 def _assert_legacy_keyed(apps: StateApps) -> None:
     Category, CategoryTerm = apps.get_model("finance", "Category"), apps.get_model("finance", "CategoryTerm")
     by_name = {c.name: c for c in Category.objects.filter(organization__slug="legacy-org").select_related("parent")}

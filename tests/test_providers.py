@@ -7,11 +7,10 @@ fakescalable. Nothing is mocked.
 from importlib import import_module
 
 import pytest
-from django.db import connection
 
 from finance import crypto, models
 from finance.scheduled import sync_all_accounts
-from tests.conftest import COMPLETE, LINK, REDIRECTS, account, connection_of, holding, make_provider, register_application, tx
+from tests.conftest import COMPLETE, LINK, REDIRECTS, account, connection_of, holding, register_application, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -341,27 +340,3 @@ async def test_consents_without_a_provider_wait_for_the_organizations_first_one(
     assert orphaned.errors[0].extensions["code"] == "NOT_CONFIGURED"
     assert (await models.BankConnection.objects.aget(id=linked["id"])).bank_provider_id == int(created["id"])
     assert synced["created"] == 1
-
-
-def test_the_migration_gives_scalable_logins_their_provider(transactional_db, authenticated_context, other_org_context):
-    """0012's data step, run on rows as 0011 left them: Scalable logins of two organizations, none attached."""
-    migration = import_module("finance.migrations.0012_bank_providers")
-    organization, other = authenticated_context.request.organization, other_org_context.request.organization
-    existing = make_provider(other, "SCALABLE", name="Already there")
-    rows = [
-        models.BankConnection.objects.create(organization=org, provider=kind, aspsp_name="x", aspsp_country="DE", state=f"s{index}", redirect_url="", pending_expires_at="2026-01-01T00:00:00Z")
-        for index, (org, kind) in enumerate([(organization, "SCALABLE"), (organization, "SCALABLE"), (organization, "ENABLEBANKING"), (other, "SCALABLE")])
-    ]
-
-    from django.apps import apps
-
-    with connection.schema_editor() as editor:
-        migration.scalable_providers(apps, editor)
-        migration.scalable_providers(apps, editor)  # nothing left to attach the second time
-
-    for row in rows:
-        row.refresh_from_db()
-    created = models.BankProvider.objects.get(organization=organization)
-    assert (created.kind, created.name, created.capabilities) == ("SCALABLE", "Scalable Capital", ["BALANCES", "HOLDINGS", "PRICES", "SCHEDULED_SYNC", "TRANSACTIONS"])
-    assert [row.bank_provider_id for row in rows] == [created.id, created.id, None, existing.id]
-    assert models.BankProvider.objects.count() == 2

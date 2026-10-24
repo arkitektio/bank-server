@@ -7,9 +7,11 @@ then the YAML file (``config.yaml`` where the service runs by default; override 
 with a ``ValidationError`` if they are not supplied via config or environment.
 """
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-from pydantic import BaseModel, ByteSize, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from arkitekt_datalayer.configuration import DatalayerBucket, DatalayerSettings
 
 from arkitekt_service.server.settings import DjangoSettings, InstanceSettings, PostgresSettings, RedisSettings, ServiceSettings
 from authentikate.base_models import AuthentikateSettings
@@ -92,63 +94,11 @@ class CategorizationSettings(BaseModel):
     term_assign_distance: float = Field(default=0.15, description="A term this close (the merchant or keyword itself, e.g. 'hofer' → Groceries) is enough evidence for an automatic assignment on its own.")
 
 
-class DatalayerBucket(BaseModel):
-    """A single S3 bucket binding within the datalayer."""
+class BankDatalayerSettings(DatalayerSettings):
+    """S3 storage for uploaded files: statement exports to import."""
 
-    model_config = ConfigDict(extra="allow")
-
-    bucket: str = Field(description="S3 bucket name.")
-    default_max_bytes: Optional[ByteSize] = Field(default=None, description="Per-upload byte budget advertised on this bucket's grants when no quota sets `max_upload_bytes`. Accepts `500GiB`-style strings. Unset: 100 MiB.")
-
-
-class QuotaLimits(BaseModel):
-    """Byte limits at one level of the quota tree. Unset inherits from the level above; null at every level is unlimited.
-
-    Byte values accept ints or strings such as ``500GiB`` / ``2TB``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    max_upload_bytes: Optional[ByteSize] = Field(default=None, description="Largest single store (upload) a user may write. Advertised on the grant as `maxBytes`; a declared `fileSize` above it is refused.")
-    max_user_bytes: Optional[ByteSize] = Field(default=None, description="Total bytes one user may hold in one organization. A new upload grant is refused once it would pass this.")
-
-
-class OrganizationQuota(QuotaLimits):
-    """Quota for one organization, plus per-user overrides inside it."""
-
-    max_org_bytes: Optional[ByteSize] = Field(default=None, description="Total bytes the whole organization may hold.")
-    users: Dict[str, QuotaLimits] = Field(default_factory=dict, description="Per-user overrides in this organization, keyed by the user's token `sub`.")
-
-
-class QuotaSettings(BaseModel):
-    """Upload quotas, set by the hub owner. Resolved most specific first: user in org, then org, then `default`."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    default: OrganizationQuota = Field(default_factory=OrganizationQuota, description="Limits for every organization without its own entry (its `users` map is ignored).")
-    organizations: Dict[str, OrganizationQuota] = Field(default_factory=dict, description="Per-organization quotas, keyed by the token `org` claim -- since authentikate 4.0 the lok organization *id* as a string (e.g. `3`), not a readable name.")
-
-
-class DatalayerSettings(BaseModel):
-    """S3 storage for uploaded files (the vendored ``datalayer`` app, as in mikro/elektro): statement exports to import.
-
-    A client asks for a scoped upload grant (STS ``AssumeRole`` with a one-key session policy),
-    writes the file straight to the bucket, and hands the store to an import mutation.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    access_key: str = Field(description="S3 access key. Secret — must be set.")
-    secret_key: str = Field(description="S3 secret key. Secret — must be set.")
-    host: Optional[str] = Field(default=None, description="S3 endpoint host.")
-    port: Optional[int] = Field(default=None, description="S3 endpoint port.")
-    protocol: str = Field(default="http", description="S3 endpoint protocol (http or https).")
-    region: str = Field(default="us-east-1", description="S3 region name.")
-    role_arn: Optional[str] = Field(default=None, description="The role upload grants assume. RustFS/MinIO ignore its value and scope the session by the inline policy alone, but STS needs one.")
-    session_duration_seconds: int = Field(default=3600, description="How long an upload or read grant lasts (clamped to 900–43200).")
+    session_name: str = Field(default="bank", description="Prefix of every STS session bank assumes, so an object store's audit log names it.")
     bigfile: DatalayerBucket = Field(description="Bucket for uploaded files (statement exports).")
-    upload_roles: List[str] = Field(default_factory=lambda: ["admin", "editor", "bot"], description="Organization roles allowed to request upload grants. Holding any one of them is enough.")
-    quotas: QuotaSettings = Field(default_factory=QuotaSettings, description="Per-organization, per-user and per-upload byte quotas.")
 
 
 class ImportSettings(BaseModel):
@@ -218,7 +168,7 @@ class Settings(ServiceSettings):
     categorization: CategorizationSettings = Field(default_factory=CategorizationSettings, description="Semantic categorization (suggestions and automatic assignment).")
     geocoding: GeocodingSettings = Field(default_factory=GeocodingSettings, description="Address lookups for merchant locations.")
     prices: PricesSettings = Field(default_factory=PricesSettings, description="Security prices (Scalable, Twelve Data, Yahoo).")
-    datalayer: Optional[DatalayerSettings] = Field(default=None, description="S3 storage for uploaded statement exports. Without it files cannot be uploaded (`import_finanzguru` still imports a local file).")
+    datalayer: Optional[BankDatalayerSettings] = Field(default=None, description="S3 storage for uploaded statement exports. Without it files cannot be uploaded (`import_finanzguru` still imports a local file).")
     imports: ImportSettings = Field(default_factory=ImportSettings, description="How imported statements merge with synced history.")
     rekuest_hook: Optional[RekuestHookSettings] = Field(default=None, description="Expose `sync_all_accounts` to the hub's rekuest, which schedules it. Without it nothing syncs unless a client asks.")
     instance: Optional[InstanceSettings] = Field(default=None, description="This instance's key and the hub trust bundle (signed requests to and from rekuest, no shared secrets).")
