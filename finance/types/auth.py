@@ -12,7 +12,7 @@ from authentikate import models as amodels
 @kante.django_type(amodels.Organization, description="An organization (tenant). Every bank object belongs to exactly one, and queries only see the current one's data.")
 class Organization:
     id: strawberry.ID
-    slug: str
+    identifier: str = strawberry.field(description="The organization across issuers and services: `<issuer>#<org>`.")
 
 
 @kante.django_type(amodels.User, description="A user account; sub is the stable subject identifier from the identity provider.")

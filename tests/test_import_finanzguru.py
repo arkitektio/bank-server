@@ -416,7 +416,7 @@ async def test_the_command_previews_and_applies_a_local_file(tmp_path, authentic
     path.write_bytes(csv_export([fg("1", ref, "01.09.2026", "-5", "Kiosk", main="Lebenshaltung", sub="Lebensmittel")]))
     org = authenticated_context.request.organization
 
-    await database_sync_to_async(call_command)("import_finanzguru", str(path), "--org", org.slug)
+    await database_sync_to_async(call_command)("import_finanzguru", str(path), "--org", org.identifier)
     assert await models.Transaction.objects.acount() == 0
     await database_sync_to_async(call_command)("import_finanzguru", str(path), "--org", str(org.id), "--apply")
     assert await models.Transaction.objects.filter(import_ref="fg:1", account__organization=org).acount() == 1

@@ -107,7 +107,7 @@ def intake(settings):
 def _organization():
     from authentikate.models import Organization
 
-    return Organization.objects.get_or_create(slug="signals-test-org")[0]
+    return Organization.objects.get_or_create(identifier="static_issuer#signals-test-org")[0]
 
 
 def test_the_manifest_declares_every_model_signal():
@@ -154,7 +154,7 @@ def test_a_save_is_signalled_signed_by_this_instance(intake):
     obj = Category.objects.create(name='signalled', organization=org)
 
     (received,) = intake.of("@bank/category")
-    assert (received["json"]["kind"], received["json"]["object"], received["json"]["organization"]) == ("CREATED", str(obj.pk), org.slug)
+    assert (received["json"]["kind"], received["json"]["object"], received["json"]["organization"]) == ("CREATED", str(obj.pk), org.identifier)
     assert received["path"] == "/agi/signal/bank"
     verified = trust.verify("POST", received["path"], received["body"], received["headers"]["Authorization"], audience="rekuest")
     assert verified.issuer == "bank"
@@ -169,7 +169,7 @@ async def test_a_sync_is_one_account_signal_with_its_counts(intake, link, fakeba
 
     fakebank.scenario([account(iban="AT1", transactions=[tx("-1.00", "2026-09-01", "Shop"), tx("-2.00", "2026-09-02", "Cafe")])])
     await link()
-    await sync_all_accounts(organization="static_org")
+    await sync_all_accounts(organization="static_issuer#static_org")
 
     def synced():
         return [r for r in intake.of("@bank/bankaccount", count=1) if "@bank/new_transactions" in r["json"]["descriptors"]]

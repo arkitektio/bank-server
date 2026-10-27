@@ -73,7 +73,7 @@ def _eq(key: str, value: object) -> list[dict]:
 async def test_an_object_answers_the_descriptors_its_structure_declares(link, aexecute, fakebank, authenticated_context):
     fakebank.scenario([account(iban="AT1", transactions=[tx("-1.00", "2026-09-01", "Shop")])])
     await link()
-    await sync_all_accounts(organization="static_org")
+    await sync_all_accounts(organization="static_issuer#static_org")
     organization = authenticated_context.request.organization
     category = await models.Category.objects.acreate(name="described", organization=organization, kind=models.CategoryKind.INCOME)
     merchant = await models.Merchant.objects.acreate(name="Shop", key="shop", organization=organization, online=True)
@@ -149,7 +149,7 @@ async def test_a_sync_stores_what_its_bulk_writes_describe_and_requires_filters_
         ]
     )
     await link()
-    await sync_all_accounts(organization="static_org")
+    await sync_all_accounts(organization="static_issuer#static_org")
 
     rows = {row.counterparty: row for row in await _stored(models.Transaction, account__organization=organization)}
     assert len(rows) == 6  # the streaming payments share a counterparty
@@ -297,7 +297,7 @@ async def test_a_cancelled_login_is_stored_as_cancelled(aexecute, fakebank, prov
 async def test_the_setup_job_repairs_a_row_that_misses_its_descriptors(link, fakebank, authenticated_context):
     fakebank.scenario([account(iban=_iban(), transactions=[tx("-1.00", "2026-09-01", "Shop")])])
     await link()
-    await sync_all_accounts(organization="static_org")
+    await sync_all_accounts(organization="static_issuer#static_org")
     row = await models.Transaction.objects.aget(account__organization=authenticated_context.request.organization)
     category = await models.Category.objects.acreate(name="blanked", organization=authenticated_context.request.organization)
 
@@ -312,10 +312,10 @@ async def test_the_setup_job_repairs_a_row_that_misses_its_descriptors(link, fak
 
 async def _stale_rows(organization: Organization) -> dict[type, int]:
     """One category (with its term) and one transaction of ``organization``, all embedded by another model."""
-    category = await models.Category.objects.acreate(name=f"stale {organization.slug}", organization=organization)
+    category = await models.Category.objects.acreate(name=f"stale {organization.identifier}", organization=organization)
     term = await models.CategoryTerm.objects.filter(category=category).afirst()
     bank_account = await models.BankAccount.objects.acreate(organization=organization, currency="EUR", name="Giro")
-    transaction = await models.Transaction.objects.acreate(account=bank_account, fingerprint=f"stale-{organization.slug}", amount=Decimal("-1.00"), currency="EUR", counterparty="Shop")
+    transaction = await models.Transaction.objects.acreate(account=bank_account, fingerprint=f"stale-{organization.identifier}", amount=Decimal("-1.00"), currency="EUR", counterparty="Shop")
     rows = {models.Category: category.pk, models.CategoryTerm: term.pk, models.Transaction: transaction.pk}
     for model, pk in rows.items():
         await model.objects.filter(pk=pk).aupdate(embedding_model="another-model")
@@ -332,11 +332,11 @@ async def test_a_sweep_for_one_organization_claims_only_its_rows(authenticated_c
 
     # A category carries its organization; a term reaches it through its category, a transaction through its account.
     for model in (models.Category, models.CategoryTerm, models.Transaction):
-        assert await sync_to_async(stale)(model, "other_org") == {theirs[model]}
-        assert await sync_to_async(stale)(model, "static_org") == {mine[model]}
+        assert await sync_to_async(stale)(model, "static_issuer#other_org") == {theirs[model]}
+        assert await sync_to_async(stale)(model, "static_issuer#static_org") == {mine[model]}
         assert await sync_to_async(stale)(model, None) == {mine[model], theirs[model]}
 
-    result = await agent.actions["reembed_stale"].function(organization="other_org")
+    result = await agent.actions["reembed_stale"].function(organization="static_issuer#other_org")
 
     assert result["reembedded"] >= 3
     for model in (models.Category, models.CategoryTerm, models.Transaction):

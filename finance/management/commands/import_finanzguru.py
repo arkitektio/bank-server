@@ -24,7 +24,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser) -> None:  # noqa: ANN001
         parser.add_argument("path", help="The export (.xlsx, or CSV with the same columns).")
-        parser.add_argument("--org", required=True, help="The organization: its id or slug.")
+        parser.add_argument("--org", required=True, help="The organization: its id or identifier (`<iss>#<org>`).")
         parser.add_argument("--apply", action="store_true", help="Write the import (default: preview only).")
         parser.add_argument(
             "--account", action="append", default=[], metavar="REFERENZKONTO=ID|new|skip", help="Where one account of the file goes (repeatable)."
@@ -34,7 +34,7 @@ class Command(BaseCommand):
         path = Path(options["path"])
         if not path.is_file():
             raise CommandError(f"No such file: {path}")
-        org_filter = Q(slug=options["org"]) | (Q(id=int(options["org"])) if options["org"].isdigit() else Q())
+        org_filter = Q(identifier=options["org"]) | (Q(id=int(options["org"])) if options["org"].isdigit() else Q())
         organization = Organization.objects.filter(org_filter).first()
         if organization is None:
             raise CommandError(f"No organization {options['org']!r}.")

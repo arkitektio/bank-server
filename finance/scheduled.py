@@ -3,7 +3,7 @@
 ``sync_all_accounts`` syncs an organization's active syncers, unattended, within their budget;
 ``reembed_stale`` re-embeds its stale rows. Both are registered on the agent declared in
 ``bank_server.hook_agent`` (``arkitekt_service.hook``). Every organization has the agent, so a
-run is handed its organization's slug and does that organization's share of the work, nothing
+run is handed its organization's identifier and does that organization's share of the work, nothing
 else. The actions are only offered: nothing here schedules them, that is the organization's own
 automation. Nothing here loops or waits — each run is one pass, started by rekuest, and a run
 lost to a crash is simply followed by the next one.
@@ -34,7 +34,7 @@ def _due_syncers(organization: str) -> list[int]:
     now = timezone.now()
     reserve = settings.BANK_SYNC.get("scheduled_reserve", 1)
     candidates = (
-        models.AccountSyncer.objects.filter(organization__slug=organization, connection__status=models.ConnectionStatus.ACTIVE)
+        models.AccountSyncer.objects.filter(organization__identifier=organization, connection__status=models.ConnectionStatus.ACTIVE)
         .filter(Q(connection__valid_until__isnull=True) | Q(connection__valid_until__gt=now))
         # Only what an admin let run unattended: an enabled provider with SCHEDULED_SYNC on.
         .filter(connection__bank_provider__enabled=True, connection__bank_provider__capabilities__contains=[models.ProviderCapability.SCHEDULED_SYNC.value])

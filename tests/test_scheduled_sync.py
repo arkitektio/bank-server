@@ -68,7 +68,7 @@ async def test_a_scheduled_pass_syncs_every_active_account(link, fakebank):
     fakebank.scenario([account(iban="AT1", transactions=[tx("-1.00", "2026-09-01", "Shop")]), account(iban="AT2")])
     await link()
 
-    result = await sync_all_accounts(organization="static_org")
+    result = await sync_all_accounts(organization="static_issuer#static_org")
 
     assert result == {"synced": 2, "skipped": 0, "failed": 0}
     assert await models.Transaction.objects.acount() == 1
@@ -81,14 +81,14 @@ async def test_a_pass_syncs_only_the_organization_it_runs_for(link, fakebank, ot
     await link()
     await link(other_org_context)
 
-    assert await sync_all_accounts(organization="other_org") == {"synced": 1, "skipped": 0, "failed": 0}
+    assert await sync_all_accounts(organization="static_issuer#other_org") == {"synced": 1, "skipped": 0, "failed": 0}
 
     synced = models.AccountSyncer.objects.filter(last_synced_at__isnull=False)
-    assert [slug async for slug in synced.values_list("organization__slug", flat=True)] == ["other_org"]
-    assert await models.Transaction.objects.filter(account__organization__slug="static_org").acount() == 0
-    assert await models.Transaction.objects.filter(account__organization__slug="other_org").acount() == 1
+    assert [identifier async for identifier in synced.values_list("organization__identifier", flat=True)] == ["static_issuer#other_org"]
+    assert await models.Transaction.objects.filter(account__organization__identifier="static_issuer#static_org").acount() == 0
+    assert await models.Transaction.objects.filter(account__organization__identifier="static_issuer#other_org").acount() == 1
     # An organization without bank links has nothing to do.
-    assert await sync_all_accounts(organization="nobody") == {"synced": 0, "skipped": 0, "failed": 0}
+    assert await sync_all_accounts(organization="static_issuer#nobody") == {"synced": 0, "skipped": 0, "failed": 0}
 
 
 async def test_the_reserve_is_left_for_users(link, fakebank):
@@ -97,14 +97,14 @@ async def test_the_reserve_is_left_for_users(link, fakebank):
     # 4 a day (the test limit); 3 spent → 1 left, which is the reserve.
     await models.AccountSyncer.objects.filter(account_id=acc_id).aupdate(syncs_today=3, sync_day=timezone.now().date())
 
-    assert await sync_all_accounts(organization="static_org") == {"synced": 0, "skipped": 0, "failed": 0}
+    assert await sync_all_accounts(organization="static_issuer#static_org") == {"synced": 0, "skipped": 0, "failed": 0}
     assert (await models.AccountSyncer.objects.aget(account_id=acc_id)).syncs_today == 3  # nothing spent
 
 
 async def test_a_signed_assign_runs_the_sync(hooked, link, fakebank):
     fakebank.scenario([account(iban="AT1")])
     acc_id = int((await link())["accounts"][0]["id"])
-    body = json.dumps({"type": "ASSIGN", "task": "501", "interface": "sync_all_accounts", "org": "static_org", "args": {}}).encode()
+    body = json.dumps({"type": "ASSIGN", "task": "501", "interface": "sync_all_accounts", "org": "static_issuer#static_org", "args": {}}).encode()
 
     response = await sync_to_async(HttpClient().post)("/_rekuest/hook", data=body, content_type="application/json", headers=_signed(body))
     assert response.status_code == 202

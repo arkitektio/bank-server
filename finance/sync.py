@@ -458,7 +458,7 @@ def _signal_sync(result: SyncResult) -> None:
     account = models.BankAccount.objects.select_related("organization").get(id=result.account_id)
     bank_account_signal.emit(
         account.pk,
-        organization=account.organization.slug,
+        organization=account.organization.identifier,
         kind="UPDATED",
         # The account's own descriptors, plus what only this event knows.
         descriptors={**bank_account.describe(account), NEW_TRANSACTIONS: result.created, UPDATED_TRANSACTIONS: result.updated},

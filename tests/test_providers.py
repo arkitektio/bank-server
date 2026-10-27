@@ -4,6 +4,7 @@ End to end against fakebank (which verifies each application's RS256 JWT by its 
 fakescalable. Nothing is mocked.
 """
 
+import datetime
 from importlib import import_module
 
 import pytest
@@ -255,10 +256,10 @@ async def test_the_unattended_sync_only_runs_providers_that_allow_it(aexecute, l
     account_id = (await link())["accounts"][0]["id"]
     await _set(eb_provider, capabilities=["TRANSACTIONS", "BALANCES"])
 
-    skipped = await sync_all_accounts("static_org")
+    skipped = await sync_all_accounts("static_issuer#static_org")
     by_hand = (await aexecute(SYNC, {"id": account_id})).data["syncAccount"]
     await _set(eb_provider, capabilities=["TRANSACTIONS", "BALANCES", "SCHEDULED_SYNC"])
-    ran = await sync_all_accounts("static_org")
+    ran = await sync_all_accounts("static_issuer#static_org")
 
     assert skipped == {"synced": 0, "skipped": 0, "failed": 0}
     assert by_hand["created"] == 1
@@ -266,8 +267,10 @@ async def test_the_unattended_sync_only_runs_providers_that_allow_it(aexecute, l
 
 
 async def test_scalable_holdings_and_prices_follow_their_capabilities(aexecute, scalable_link, provider_for, fakescalable, fakemarket):
-    fakescalable.seed({"p1": {"cash": 100, "holdings": [holding("IE00TEST0001", 2, 109.0, 100.0)], "transactions": []}})
-    fakescalable.prices({"IE00TEST0001": [("2026-09-24", 108.0), ("2026-09-25", 109.0)]})
+    fakescalable.seed({"p1": {"cash": 100, "holdings": [holding("IE00SCAL0001", 2, 109.0, 100.0)], "transactions": []}})
+    # Within the 31 days a sync refreshes: fixed dates expire as the calendar moves on.
+    today = datetime.date.today()
+    fakescalable.prices({"IE00SCAL0001": [(str(today - datetime.timedelta(days=3)), 108.0), (str(today - datetime.timedelta(days=2)), 109.0)]})
     connection_ = await scalable_link()
     depot = next(a["id"] for a in connection_["accounts"] if a["kind"] == "DEPOT")
     provider = await provider_for("SCALABLE")
@@ -276,7 +279,7 @@ async def test_scalable_holdings_and_prices_follow_their_capabilities(aexecute, 
     seen = len(fakescalable.log())
     without = (await aexecute(SYNC, {"id": depot})).data["syncAccount"]
     asked = {e["operation"] for e in fakescalable.log()[seen:] if "operation" in e}
-    quote = await aexecute('{ securityQuote(isin: "IE00TEST0001", priceSource: SCALABLE) { price } }', allow_errors=True)
+    quote = await aexecute('{ securityQuote(isin: "IE00SCAL0001", priceSource: SCALABLE) { price } }', allow_errors=True)
     stored_without = await models.HoldingSnapshot.objects.aexists()
     await _set(provider, capabilities=["TRANSACTIONS", "BALANCES", "HOLDINGS", "PRICES"])
     with_all = (await aexecute(SYNC, {"id": depot})).data["syncAccount"]

@@ -14,7 +14,7 @@ dependencies = [
     "daphne>=4.0.0,<5",
     "channels-redis>=4.1.0,<5",
     "django-choices-field>=3",
-    "authentikate>=5.1.0",
+    "authentikate>=6.0.0",
     "kante>=2.1.1",
     "koherent>=4.0",
     "ujson>=5.8.0,<6",
@@ -32,8 +32,8 @@ dependencies = [
     "boto3>=1.38.9",
     "django-polymorphic>=4.1.0",
     "openpyxl>=3.1",
-    "arkitekt-service>=7.0.0",
-    "arkitekt-datalayer>=1.0.0",
+    "arkitekt-service>=8.0.0",
+    "arkitekt-datalayer>=2.0.0",
 ]
 
 [dependency-groups]

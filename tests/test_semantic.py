@@ -121,7 +121,7 @@ async def test_similar_and_near_category_stay_in_the_organization(link, aexecute
     other_acc, _ = await _bank(link, aexecute, fakebank, rows, context=other_org_context)
     mine = await _rows(aexecute, acc)
     theirs = await _rows(aexecute, other_acc, context=other_org_context)
-    groceries = str((await models.Category.objects.filter(key="food.groceries", organization__slug="static_org").afirst()).id)
+    groceries = str((await models.Category.objects.filter(key="food.groceries", organization__identifier="static_issuer#static_org").afirst()).id)
 
     similar = (await aexecute("query($t: ID!) { transaction(id: $t) { similarTransactions(limit: 5, maxDistance: 0.2) { id } } }", {"t": mine["BILLA DANKT 0421"]["id"]})).data["transaction"]["similarTransactions"]
     by_filter = (await aexecute("query($t: ID!) { transactions(filters: {similarTo: $t}) { id } }", {"t": mine["BILLA DANKT 0421"]["id"]})).data["transactions"]

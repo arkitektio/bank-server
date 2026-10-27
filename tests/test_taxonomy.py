@@ -75,7 +75,7 @@ async def test_a_subtree_is_one_kind(link, aexecute, fakebank):
 async def test_seeding_adopts_a_same_named_category_instead_of_duplicating(transactional_db):
     from authentikate.models import Organization
 
-    org = await Organization.objects.acreate(slug="adopt-org")
+    org = await Organization.objects.acreate(identifier="static_issuer#adopt-org")
     await models.Category.objects.acreate(organization=org, name="Food", kind="EXPENSE")
 
     from asgiref.sync import sync_to_async
@@ -98,7 +98,7 @@ async def test_descriptions_become_terms_and_follow_edits(link, aexecute, fakeba
 
 def _assert_legacy_keyed(apps: StateApps) -> None:
     Category, CategoryTerm = apps.get_model("finance", "Category"), apps.get_model("finance", "CategoryTerm")
-    by_name = {c.name: c for c in Category.objects.filter(organization__slug="legacy-org").select_related("parent")}
+    by_name = {c.name: c for c in Category.objects.filter(organization__identifier="legacy-org").select_related("parent")}
     assert by_name["Groceries"].key == "food.groceries" and by_name["Groceries"].parent.key == "food"
     assert by_name["Rent & Housing"].key == "housing" and by_name["Rent & Housing"].parent is None
     assert by_name["Utilities"].parent_id == by_name["Rent & Housing"].id  # under the legacy root that became housing

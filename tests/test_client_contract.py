@@ -177,7 +177,7 @@ async def test_categories_and_recurring_ordering(link, aexecute, fakebank):
 
     names = [c["name"] for c in (await aexecute("{ categories(ordering: [{name: ASC}]) { name } }")).data["categories"]]
     # Postgres collation, not Python's sort order ("Fitness & Sports" vs "Food").
-    by_db = [n async for n in models.Category.objects.filter(organization__slug="static_org").order_by("name").values_list("name", flat=True)]
+    by_db = [n async for n in models.Category.objects.filter(organization__identifier="static_issuer#static_org").order_by("name").values_list("name", flat=True)]
 
     assert names == by_db and len(names) > 3
     assert (await aexecute("{ recurringPayments(ordering: [{nextExpected: ASC}]) { id } } ")).data["recurringPayments"] == []

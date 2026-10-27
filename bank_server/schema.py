@@ -186,6 +186,10 @@ class Mutation:
     # Uploads (the datalayer): request a grant, write the file to S3, finish, then import it.
     request_bigfile_upload = upload_mutation(resolver=datalayer_mutations.request_bigfile_upload, description="Request temporary S3 credentials to upload one file (e.g. a statement export to import).")
     finish_bigfile_upload = upload_mutation(resolver=datalayer_mutations.finish_bigfile_upload, description="Finalize a file upload after the client has written the object.")
+    refresh_bigfile_upload = upload_mutation(
+        description="Reissue upload credentials for a bigfile upload still in flight, to the same key, so a write that outlives its credentials carries on. Only the uploader may, never for a finished store, and never past the upload's time limit",
+        resolver=datalayer_mutations.refresh_bigfile_upload,
+    )
     request_bigfile_access = mutation(resolver=datalayer_mutations.request_bigfile_access, description="Request temporary S3 read credentials for an uploaded file.")
 
     # Imports: preview an uploaded export, map its categories, apply it.

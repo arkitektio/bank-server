@@ -434,7 +434,7 @@ def tx(amount: str, day: str, party: str | None = None, *, iban: str | None = No
 def _context(token: str, sub: str, org_slug: str, roles: list[str] | None = None) -> HttpContext:
     user, _ = User.objects.get_or_create(sub=sub, iss="static_issuer", defaults={"username": f"static_issuer_{sub}"})
     client, _ = Client.objects.get_or_create(client_id="oinsoins")
-    org, _ = Organization.objects.get_or_create(slug=org_slug)
+    org, _ = Organization.objects.get_or_create(identifier=f"static_issuer#{org_slug}")
     membership, _ = Membership.objects.update_or_create(user=user, organization=org, defaults={"roles": roles or ["editor"]})
     request = UniversalRequest(_extensions={"token": token}, _client=client, _user=user, _organization=org)  # type: ignore[arg-type]
     request.set_membership(membership)  # type: ignore[arg-type]
@@ -568,7 +568,7 @@ def datalayer(backend_stack):
 
 
 REQUEST_UPLOAD = """
-mutation($name: String!, $size: ByteCount) { requestBigfileUpload(input: {originalFileName: $name, fileSize: $size}) { accessKey secretKey sessionToken region bucket key store } }
+mutation($name: String!, $size: ByteCount!) { requestBigfileUpload(input: {originalFileName: $name, fileSize: $size}) { accessKey secretKey sessionToken region bucket key store } }
 """
 FINISH_UPLOAD = "mutation($id: String!) { finishBigfileUpload(input: {storeId: $id}) { id sizeBytes originalFileName } }"
 

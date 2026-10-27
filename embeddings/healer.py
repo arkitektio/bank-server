@@ -30,10 +30,10 @@ logger = logging.getLogger(__name__)
 
 def stale_queryset(model_cls: type[EmbeddedDescriptionMixin], organization: str | None = None) -> models.QuerySet[Any]:
     """Rows of ``model_cls`` whose vector was not produced by the configured model — every
-    organization's, or only those of ``organization`` (its slug)."""
+    organization's, or only those of ``organization`` (its identifier, ``"<iss>#<org>"``)."""
     stale = model_cls._default_manager.exclude(embedding_model=engine.model_id())
     if organization is not None:
-        stale = stale.filter(**{f"{model_cls.embedding_organization_path}__slug": organization})
+        stale = stale.filter(**{f"{model_cls.embedding_organization_path}__identifier": organization})
     return stale
 
 

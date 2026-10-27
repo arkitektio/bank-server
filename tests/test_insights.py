@@ -124,7 +124,7 @@ async def test_area_insights_and_spending_grid(link, aexecute, fakebank, fakegeo
     await _setup(link, aexecute, fakebank)
     await _setup(link, aexecute, fakebank, context=other_org_context)  # the same rows, located the same, in another organization
     for context in (None, other_org_context):
-        stores = {l.store_code: str(l.id) async for l in models.MerchantLocation.objects.filter(merchant__organization__slug="other_org" if context else "static_org")}
+        stores = {l.store_code: str(l.id) async for l in models.MerchantLocation.objects.filter(merchant__organization__identifier="static_issuer#other_org" if context else "static_issuer#static_org")}
         await aexecute('mutation($id: ID!) { geocodeMerchantLocation(id: $id, query: "Mariahilfer Wien") { id } }', {"id": stores["3418"]}, context=context)
         await aexecute('mutation($id: ID!) { geocodeMerchantLocation(id: $id, query: "Annenstraße Graz") { id } }', {"id": stores["3428"]}, context=context)
     vienna = {"near": {"latitude": 48.2, "longitude": 16.35, "radiusMeters": 2000}}
@@ -205,7 +205,7 @@ async def test_portfolio_insights(scalable_link, aexecute, fakescalable):
 
 async def test_views_resolve_only_in_the_callers_organization(link, aexecute, fakebank, other_org_context):
     ids = await _setup(link, aexecute, fakebank)
-    food = str((await models.Category.objects.aget(key="food", organization__slug="static_org")).id)
+    food = str((await models.Category.objects.aget(key="food", organization__identifier="static_issuer#static_org")).id)
 
     for query, variables in [
         ('{ merchantInsights(merchant: {key: "spar"}) { totals { count } } }', {}),
