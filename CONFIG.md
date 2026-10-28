@@ -253,7 +253,7 @@ still imports a local file.
 | `session_duration_seconds` | `DATALAYER__SESSION_DURATION_SECONDS` | int | `3600` | How long a grant lasts (clamped to 900–43200). |
 | `bigfile.bucket` | `DATALAYER__BIGFILE__BUCKET` | str | — | The bucket uploads land in (`bank-imports`; created by `rustfs_init` from `configs/rustfs.yaml`). |
 | `bigfile.default_max_bytes` | — | size? | 100 MiB | Per-upload byte budget advertised on grants when no quota sets one. |
-| `upload_roles` | — | list | `[admin, editor, bot]` | Organization roles allowed to request upload grants. |
+| `upload_roles` | — | list | `[]` (then `bank_editor`) | Roles allowed to request upload grants; empty means bank's editor role. |
 | `quotas` | — | object | unlimited | Per-organization / per-user byte quotas (same shape as mikro's). |
 
 ### `imports` — merging imported statements with synced history

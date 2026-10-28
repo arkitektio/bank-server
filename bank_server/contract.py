@@ -7,15 +7,29 @@ the same commit, and no installer has to learn of it.
 
 from __future__ import annotations
 
-from arkitekt_service.contract import JSON, Contract, Description, Descriptor, Facts, Hosts, Job, Needs, Offers, Scope, Signal, Start, Structure, blocks
+from arkitekt_service.contract import JSON, Contract, Description, Descriptor, Facts, Hosts, Job, Needs, Offers, Role, Scope, Signal, Start, Structure, blocks
 
 from bank_server.configuration import Settings
 
-#: What a token may be allowed to do here: defined at the coordination server when the hub enrols.
+#: What an app may do here on a user's behalf: defined at the coordination server when the hub
+#: enrols. Every root field of the schema asks for one of them (`AuthExtension(scopes=...)`).
 SCOPES = [
-    Scope(key="bank_read", description="Read bank accounts, transactions and budgets"),
-    Scope(key="bank_write", description="Link accounts, import statements and edit budgets"),
+    Scope(key="bank_read", description="See your linked accounts, balances, transactions, categories, budgets and recurring payments."),
+    Scope(key="bank_write", description="Categorise and annotate transactions, edit merchants, rules, budgets and recurring payments, and import statements."),
+    Scope(key="bank_link", description="Connect and disconnect bank accounts and sync them with your bank; this goes through your bank's sign-in."),
+    Scope(key="bank_providers", description="Set up the banking providers (Enable Banking, Scalable) that accounts can be linked through."),
+    Scope(key="bank_all", description="Do everything in Bank on your behalf.", is_all_scope=True),
 ]
+
+#: What a member of an organization may do here.
+ROLES = [
+    Role(key="bank_admin", description="Full control of Bank in this organization, including banking providers.", is_admin_role=True),
+    Role(key="bank_editor", description="Link accounts and organise your transactions, budgets and categories.", is_default_role=True),
+]
+
+#: The role every write asks for, and the one that alone sets up providers.
+EDITOR = "bank_editor"
+ADMIN = "bank_admin"
 
 #: What only the per-sync UPDATED of an account carries (see ``finance.sync._signal_sync``): facts
 #: about the sync, not about the account, so the account's own descriptors never list them.
@@ -220,7 +234,7 @@ contract = Contract(
         name="bank",
         identifier="live.arkitekt.bank",
         summary="Bank accounts, transactions and budgets.",
-        needs=Needs(scopes=SCOPES, storage=["bigfile"], instance_key=True, peers=["rekuest"], secrets=["fernet"]),
+        needs=Needs(scopes=SCOPES, roles=ROLES, storage=["bigfile"], instance_key=True, peers=["rekuest"], secrets=["fernet"]),
         offers=Offers(endpoints={"rekuest_service": "_rekuest/service", "rekuest_hook": "_rekuest/hook"}),
         requires={"rekuest": ">=6"},
         hosts=HOSTS,

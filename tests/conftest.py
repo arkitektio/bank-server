@@ -435,7 +435,7 @@ def _context(token: str, sub: str, org_slug: str, roles: list[str] | None = None
     user, _ = User.objects.get_or_create(sub=sub, iss="static_issuer", defaults={"username": f"static_issuer_{sub}"})
     client, _ = Client.objects.get_or_create(client_id="oinsoins")
     org, _ = Organization.objects.get_or_create(identifier=f"static_issuer#{org_slug}")
-    membership, _ = Membership.objects.update_or_create(user=user, organization=org, defaults={"roles": roles or ["editor"]})
+    membership, _ = Membership.objects.update_or_create(user=user, organization=org, defaults={"roles": roles or ["bank_editor"]})
     request = UniversalRequest(_extensions={"token": token}, _client=client, _user=user, _organization=org)  # type: ignore[arg-type]
     request.set_membership(membership)  # type: ignore[arg-type]
     return HttpContext(request=request, response=TemporalResponse(), headers={"Authorization": f"Bearer {token}", "User-Agent": "bank-tests", "X-Forwarded-For": "203.0.113.7"}, type="http")
@@ -449,8 +449,8 @@ def authenticated_context(transactional_db) -> HttpContext:
 
 @pytest.fixture
 def admin_context(transactional_db) -> HttpContext:
-    """An admin of tenant A (``static_org``): the only role that may set providers up."""
-    return _context("admin", "3", "static_org", roles=["admin"])
+    """Bank's admin in tenant A (``static_org``): the only role that may set providers up."""
+    return _context("admin", "3", "static_org", roles=["bank_admin"])
 
 
 @pytest.fixture

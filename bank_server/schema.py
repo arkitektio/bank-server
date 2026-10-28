@@ -1,9 +1,11 @@
 """The GraphQL schema for the bank service.
 
 Every field requires an authenticated caller (``AuthExtension``) and every read is limited to
-the caller's active organization (``OrgScoped`` types, ``get_for_org`` lookups). Any member
-of an organization may link, sync, categorize and budget; only its admins set up the providers
-banks are linked through (``admin_mutation``).
+the caller's active organization (``OrgScoped`` types, ``get_for_org`` lookups). Each root field
+asks for one of bank's scopes (``bank_read``, ``bank_write``, ``bank_link``, ``bank_providers``;
+``bank_all`` stands for all of them), which ``@auth(required_scopes: ...)`` publishes. Every write
+asks for ``bank_editor``: a member holding it may link, sync, categorize and budget; only
+``bank_admin`` sets up the providers banks are linked through (``provider_mutation``).
 
 * ``AuthentikateExtension`` — authenticates the request from its bearer token
   and exposes the user/organization/client on ``info.context.request``.
@@ -24,6 +26,9 @@ from bank_server.logs import QuietErrorsSchema
 from arkitekt_datalayer import mutations as datalayer_mutations
 from arkitekt_datalayer import scalars as datalayer_scalars
 from arkitekt_datalayer.datalayer import load_config
+from arkitekt_service.graphql import annotate_schema
+from bank_server.contract import ADMIN, EDITOR
+from bank_server.service import service as bank_service
 from finance import types
 from finance.types import imports as import_types
 from finance.types import insights as insight_types
@@ -31,14 +36,20 @@ from finance.types import prices as price_types
 from finance.graphql import mutations, queries, subscriptions
 
 
-def field(**kwargs):  # noqa: ANN201
-    """A query field that requires authentication."""
-    return strawberry_django.field(extensions=[AuthExtension()], **kwargs)
+def field(scope: str = "bank_read", **kwargs):  # noqa: ANN201
+    """A field an app needs ``scope`` for (``bank_read``, unless it says otherwise)."""
+    return strawberry_django.field(extensions=[AuthExtension(scopes=[scope])], **kwargs)
 
 
-def mutation(**kwargs):  # noqa: ANN201
-    """A mutation that requires authentication."""
-    return strawberry_django.mutation(extensions=[AuthExtension()], **kwargs)
+def mutation(scope: str = "bank_write", roles: list[str] | None = None, **kwargs):  # noqa: ANN201
+    """A write: an app needs ``scope`` for it, a member one of ``roles`` (``bank_editor`` unless it says
+    otherwise; ``bank_admin`` holds every role)."""
+    return strawberry_django.mutation(extensions=[AuthExtension(scopes=[scope], any_role_of=roles or [EDITOR])], **kwargs)
+
+
+def access_mutation(**kwargs):  # noqa: ANN201
+    """A mutation that hands out read credentials: a read, for whoever may see what it reads."""
+    return strawberry_django.mutation(extensions=[AuthExtension(scopes=["bank_read"])], **kwargs)
 
 
 def upload_mutation(**kwargs):  # noqa: ANN201
@@ -47,18 +58,18 @@ def upload_mutation(**kwargs):  # noqa: ANN201
     Holding any one of the configured roles is enough. Read once, at schema build -- a change to
     the config takes a restart, like every other setting.
     """
-    roles = load_config().upload_roles
-    return strawberry_django.mutation(extensions=[AuthExtension(any_role_of=roles)], **kwargs)
+    roles = load_config().upload_roles or [EDITOR]
+    return strawberry_django.mutation(extensions=[AuthExtension(scopes=["bank_write"], any_role_of=roles)], **kwargs)
 
 
-def admin_mutation(**kwargs):  # noqa: ANN201
-    """A mutation only an admin of the request's organization may run (the role is the membership's, not the token's)."""
-    return strawberry_django.mutation(extensions=[AuthExtension(org_roles=["admin"])], **kwargs)
+def provider_mutation(**kwargs):  # noqa: ANN201
+    """A change to the providers banks are linked through: only ``bank_admin`` may, through an app granted ``bank_providers``."""
+    return strawberry_django.mutation(extensions=[AuthExtension(scopes=["bank_providers"], any_role_of=[ADMIN])], **kwargs)
 
 
 def subscription(**kwargs):  # noqa: ANN201
-    """A subscription that requires authentication."""
-    return strawberry.subscription(extensions=[AuthSubscribeExtension()], **kwargs)
+    """A subscription: what it streams is read, so an app needs ``bank_read`` for it."""
+    return strawberry.subscription(extensions=[AuthSubscribeExtension(scopes=["bank_read"])], **kwargs)
 
 
 @strawberry.type
@@ -128,18 +139,18 @@ class Query:
 class Mutation:
     """The root mutation type."""
 
-    create_enable_banking_provider = admin_mutation(resolver=mutations.create_enable_banking_provider, description="Admins: set up an Enable Banking application (id and private key) as a provider.")
-    update_enable_banking_provider = admin_mutation(resolver=mutations.update_enable_banking_provider, description="Admins: change an Enable Banking provider; an empty key keeps the stored one.")
-    create_scalable_provider = admin_mutation(resolver=mutations.create_scalable_provider, description="Admins: let the organization link Scalable Capital.")
-    update_provider = admin_mutation(resolver=mutations.update_provider, description="Admins: rename, enable or disable any provider, or change its capabilities.")
-    delete_provider = admin_mutation(resolver=mutations.delete_provider, description="Admins: remove a provider that has no active or pending connections.")
-    start_link = mutation(resolver=mutations.start_link, description="Start a login through a provider; returns the auth session.")
-    complete_auth = mutation(resolver=mutations.complete_auth, description="REDIRECT: finish with the code. POLL: advance one step; call until not PENDING.")
-    resume_auth = mutation(resolver=mutations.resume_auth, description="The same login again (a fresh openUrl if the old one cannot be reused).")
-    cancel_auth = mutation(resolver=mutations.cancel_auth, description="Drop a login that will not be finished. Idempotent.")
-    revoke_bank_connection = mutation(resolver=mutations.revoke_bank_connection, description="Withdraw a bank consent; data is kept.")
-    sync_account = mutation(resolver=mutations.sync_account, description="Pull an account from the bank now.")
-    sync_connection = mutation(resolver=mutations.sync_connection, description="Pull every account of a connection now.")
+    create_enable_banking_provider = provider_mutation(resolver=mutations.create_enable_banking_provider, description="Admins: set up an Enable Banking application (id and private key) as a provider.")
+    update_enable_banking_provider = provider_mutation(resolver=mutations.update_enable_banking_provider, description="Admins: change an Enable Banking provider; an empty key keeps the stored one.")
+    create_scalable_provider = provider_mutation(resolver=mutations.create_scalable_provider, description="Admins: let the organization link Scalable Capital.")
+    update_provider = provider_mutation(resolver=mutations.update_provider, description="Admins: rename, enable or disable any provider, or change its capabilities.")
+    delete_provider = provider_mutation(resolver=mutations.delete_provider, description="Admins: remove a provider that has no active or pending connections.")
+    start_link = mutation(scope="bank_link", resolver=mutations.start_link, description="Start a login through a provider; returns the auth session.")
+    complete_auth = mutation(scope="bank_link", resolver=mutations.complete_auth, description="REDIRECT: finish with the code. POLL: advance one step; call until not PENDING.")
+    resume_auth = mutation(scope="bank_link", resolver=mutations.resume_auth, description="The same login again (a fresh openUrl if the old one cannot be reused).")
+    cancel_auth = mutation(scope="bank_link", resolver=mutations.cancel_auth, description="Drop a login that will not be finished. Idempotent.")
+    revoke_bank_connection = mutation(scope="bank_link", resolver=mutations.revoke_bank_connection, description="Withdraw a bank consent; data is kept.")
+    sync_account = mutation(scope="bank_link", resolver=mutations.sync_account, description="Pull an account from the bank now.")
+    sync_connection = mutation(scope="bank_link", resolver=mutations.sync_connection, description="Pull every account of a connection now.")
 
     create_merchant = mutation(resolver=mutations.create_merchant, description="Create a merchant (aliases from `fromTransactions` by default) and match it everywhere.")
     resolve_security_listings = mutation(resolver=mutations.resolve_security_listings, description="Find listings for ISINs (OpenFIGI + preferred exchanges).")
@@ -190,7 +201,7 @@ class Mutation:
         description="Reissue upload credentials for a bigfile upload still in flight, to the same key, so a write that outlives its credentials carries on. Only the uploader may, never for a finished store, and never past the upload's time limit",
         resolver=datalayer_mutations.refresh_bigfile_upload,
     )
-    request_bigfile_access = mutation(resolver=datalayer_mutations.request_bigfile_access, description="Request temporary S3 read credentials for an uploaded file.")
+    request_bigfile_access = access_mutation(resolver=datalayer_mutations.request_bigfile_access, description="Request temporary S3 read credentials for an uploaded file.")
 
     # Imports: preview an uploaded export, map its categories, apply it.
     create_finanzguru_import = mutation(resolver=mutations.create_finanzguru_import, description="Preview an uploaded Finanzguru export (nothing is written into the accounts yet).")
@@ -222,3 +233,6 @@ schema = Schema(
         KoherentExtension,
     ],
 )
+
+# Which structure each type is (`@identified`), and the contract's catch-alls (`bank_all`, `bank_admin`).
+annotate_schema(schema, bank_service)

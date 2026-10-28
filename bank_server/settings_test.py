@@ -19,17 +19,25 @@ DATABASES["default"] = {
 
 # Django forces DEBUG=False under the test runner, and authentikate 3.0 refuses static
 # tokens when DEBUG is False. These are deliberate test fixtures, so opt in explicitly.
+#: What a test token is unless it says otherwise: bank's admin, through an app granted all of bank.
+ADMIN_WITH_EVERY_SCOPE = {"roles": ["bank_admin"], "scope": "openid bank_all"}
+
 AUTHENTIKATE = {
     **AUTHENTIKATE,
     "allow_static_tokens_in_production": True,
     "static_tokens": {
-        "test": {"sub": "1", "roles": ["editor"]},
-        # An admin of the same organization (roles come from the membership, see conftest), for provider setup.
-        "admin": {"sub": "3", "roles": ["admin"]},
-        # Another member of the same organization, for creator-only checks.
-        "colleague": {"sub": "2", "roles": ["editor"]},
-        # A user in a different organization, for cross-tenant scoping tests.
-        "othertest": {"sub": "9", "org": "other_org", "roles": ["editor"]},
+        name: {**ADMIN_WITH_EVERY_SCOPE, **token}
+        for name, token in {
+            "test": {"sub": "1", "roles": ["bank_editor"]},
+            # Bank's admin in the same organization, for provider setup.
+            "admin": {"sub": "3"},
+            # Another member of the same organization, for creator-only checks.
+            "colleague": {"sub": "2", "roles": ["bank_editor"]},
+            # A user in a different organization, for cross-tenant scoping tests.
+            "othertest": {"sub": "9", "org": "other_org", "roles": ["bank_editor"]},
+            # An app granted only what it reads, for the scope tests (tests/test_scopes.py).
+            "readertest": {"sub": "1", "scope": "openid bank_read"},
+        }.items()
     },
 }
 
@@ -65,5 +73,4 @@ DATALAYER = {
     "region": "us-east-1",
     "role_arn": "arn:aws:iam::000000000000:role/datalayer",
     "bigfile": {"bucket": "bank-imports"},
-    "upload_roles": ["admin", "editor", "bot"],
 }
