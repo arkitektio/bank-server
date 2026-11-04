@@ -16,7 +16,7 @@ dependencies = [
     "django-choices-field>=3",
     "authentikate>=6.1",
     "kante>=2.1.1",
-    "koherent>=4.0",
+    "koherent>=4.2.0",
     "ujson>=5.8.0,<6",
     "aioredis>=2.0.1,<3",
     "jsonpatch~=1.33",
@@ -32,7 +32,7 @@ dependencies = [
     "boto3>=1.38.9",
     "django-polymorphic>=4.1.0",
     "openpyxl>=3.1",
-    "arkitekt-service>=9.0.0",
+    "arkitekt-service>=9.2.0",
     "arkitekt-datalayer>=3.0.0",
 ]
 
