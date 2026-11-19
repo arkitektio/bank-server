@@ -328,6 +328,19 @@ Scalable's last month for the held ISINs; `refreshSecurityPrices` backfills from
 | `openfigi_api_key` | `PRICES__OPENFIGI_API_KEY` | str? | `null` | Optional; raises OpenFIGI's rate limit. |
 | `openfigi_url`, `yahoo_url`, `twelvedata_url`, `user_agent`, `timeout_seconds` | `PRICES__…` | | | Endpoints and client settings. |
 
+### `telemetry` — traces and metrics (optional)
+
+Off by default. With an `endpoint`, the service sends traces (a span per HTTP request, GraphQL
+operation, database statement and outgoing request) and metrics over OTLP/HTTP to that collector,
+and nowhere else. Without one nothing is recorded; a trace a request arrives in is still passed
+on. A collector that wants credentials reads them from `OTEL_EXPORTER_OTLP_HEADERS`.
+
+| Key | Env var | Type | Default | Description |
+|---|---|---|---|---|
+| `endpoint` | `TELEMETRY__ENDPOINT` | str | `null` | An OTLP collector's HTTP address (`http://collector:4318`). Unset: off. |
+| `sample_ratio` | `TELEMETRY__SAMPLE_RATIO` | float | `1.0` | The share of traces started here that are recorded (0–1). |
+| `metrics` | `TELEMETRY__METRICS` | bool | `true` | Send metrics beside the traces. |
+
 ## Minimal example
 
 ```yaml

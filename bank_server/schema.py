@@ -26,7 +26,7 @@ from bank_server.logs import QuietErrorsSchema
 from arkitekt_datalayer import mutations as datalayer_mutations
 from arkitekt_datalayer import scalars as datalayer_scalars
 from arkitekt_datalayer.datalayer import load_config
-from arkitekt_service.graphql import annotate_schema
+from arkitekt_service.graphql import TelemetryExtension, annotate_schema
 from bank_server.contract import ADMIN, EDITOR
 from bank_server.service import service as bank_service
 from finance import types
@@ -228,6 +228,7 @@ schema = Schema(
     subscription=Subscription,
     config=StrawberryConfig(scalar_map={**datalayer_scalars.SCALAR_MAP}),
     extensions=[
+        TelemetryExtension,
         DjangoOptimizerExtension,
         AuthentikateExtension,
         KoherentExtension,
