@@ -188,7 +188,7 @@ def _pairs(parsed: ParsedExport) -> set[tuple[str, str]]:
 # --- Preview ----------------------------------------------------------------------------------
 
 
-def _day(row: Any) -> date | None:  # noqa: ANN401 - an FgRow or a Transaction
+def _day(row: FgRow | models.Transaction) -> date | None:
     return row.booking_date if isinstance(row, FgRow) else booking_day(row)
 
 

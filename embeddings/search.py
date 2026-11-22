@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Iterable
 from typing import Any
 
 from django.db.models import Case, F, IntegerField, Q, QuerySet, Value, When
@@ -74,9 +75,9 @@ DEFAULT_NEIGHBOURS = 10
 
 def neighbourhood(
     queryset: QuerySet[Any],
-    vector: Any,
+    vector: Iterable[float] | None,
     *,
-    exclude_pk: Any = None,
+    exclude_pk: int | str | None = None,
     threshold: float | None = None,
 ) -> tuple[QuerySet[Any], Q]:
     """``queryset`` ordered by distance to ``vector``, with the predicate that selects it.
@@ -116,9 +117,9 @@ def neighbourhood(
 
 def neighbours(
     queryset: QuerySet[Any],
-    vector: Any,
+    vector: Iterable[float] | None,
     *,
-    exclude_pk: Any = None,
+    exclude_pk: int | str | None = None,
     limit: int = DEFAULT_NEIGHBOURS,
     threshold: float | None = None,
 ) -> QuerySet[Any]:

@@ -339,7 +339,7 @@ def persist(
             models.Transaction(
                 account=account, syncer=syncer, fingerprint=f"pdng:{fp}", **row
             )
-            for fp, row in zip(fingerprint_all(pending), pending)
+            for fp, row in zip(fingerprint_all(pending), pending, strict=True)
         ]
         embed_rows(pending_rows)
         # No pre_save sees a bulk write: the rows are described before they are written.
@@ -351,9 +351,13 @@ def persist(
             for tx in account.transactions.filter(fingerprint__in=fingerprints)
         }
         to_create, to_update = [], []
-        new = [(fp, row) for fp, row in zip(fingerprints, booked) if fp not in existing]
+        new = [
+            (fp, row)
+            for fp, row in zip(fingerprints, booked, strict=True)
+            if fp not in existing
+        ]
         imported = take_over_imported(account, new)
-        for fp, row in zip(fingerprints, booked):
+        for fp, row in zip(fingerprints, booked, strict=True):
             tx = existing.get(fp) or imported.get(fp)
             if tx is None:
                 to_create.append(

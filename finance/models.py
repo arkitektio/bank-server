@@ -8,6 +8,9 @@ Money is always a ``Decimal`` with an explicit currency — never a float. Amoun
 are signed: negative is money out, positive money in.
 """
 
+from collections.abc import Collection
+from typing import Any, cast
+
 from arkitekt_service.service.described import Described
 from authentikate.models import Organization, User
 from django.contrib.postgres.indexes import GinIndex, GistIndex
@@ -22,7 +25,7 @@ from embeddings.models import (
 from finance.geo import GeographyPointField, MakePoint
 
 
-def money(**kwargs) -> models.DecimalField:
+def money(**kwargs: Any) -> models.DecimalField:
     """A money column: two decimal places, up to 16 before the point."""
     return models.DecimalField(max_digits=18, decimal_places=2, **kwargs)
 
@@ -573,7 +576,7 @@ class BankAccount(Described):
             ),
         ]
 
-    def save(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+    def save(self, *args: Any, **kwargs: Any) -> None:
         self.iban_normalized = normalize_iban(self.iban)
         if (
             kwargs.get("update_fields") is not None
@@ -769,7 +772,7 @@ class Category(EmbeddedDescriptionMixin, Described):
             node = node.parent
         return node.kind
 
-    def save(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+    def save(self, *args: Any, **kwargs: Any) -> None:
         """Save, and rebuild the category's terms when its name or description changed."""
         from finance.textnorm import category_terms
 
@@ -783,8 +786,10 @@ class Category(EmbeddedDescriptionMixin, Described):
         self._terms_source = now
 
     @classmethod
-    def from_db(cls, db, field_names, values):  # noqa: ANN001, ANN206
-        instance = super().from_db(db, field_names, values)
+    def from_db(
+        cls, db: str | None, field_names: Collection[str], values: Collection[object]
+    ) -> "Category":
+        instance = cast("Category", super().from_db(db, field_names, values))
         deferred = instance.get_deferred_fields()
         if "name" not in deferred and "description" not in deferred:
             instance._terms_source = (instance.name, instance.description)

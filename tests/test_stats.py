@@ -4,13 +4,14 @@ import datetime
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from finance import models
-from tests.conftest import account, tx
+from tests.conftest import AExecute, FakeBank, Link, account, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-TODAY = datetime.date.today()
+TODAY = timezone.localdate()
 
 
 def _history() -> list[dict]:
@@ -29,7 +30,7 @@ def _history() -> list[dict]:
 
 
 @pytest.fixture
-async def seeded(link, aexecute, fakebank):
+async def seeded(link: Link, aexecute: AExecute, fakebank: FakeBank) -> dict[str, str]:
     fakebank.scenario(
         [
             account(iban="AT00GIRO", transactions=_history(), balance="4000.00"),
@@ -49,7 +50,9 @@ async def seeded(link, aexecute, fakebank):
     return {"giro": giro, "groceries": groceries}
 
 
-async def test_cashflow_per_month_excludes_transfers(seeded, aexecute):
+async def test_cashflow_per_month_excludes_transfers(
+    seeded: dict[str, str], aexecute: AExecute
+) -> None:
     result = await aexecute(
         'query { cashflow(dateFrom: "2026-06-01", dateTo: "2026-09-30") { periodStart currency income expense net count } }'
     )
@@ -73,7 +76,7 @@ async def test_cashflow_per_month_excludes_transfers(seeded, aexecute):
     assert Decimal(with_transfers.data["cashflow"][0]["expense"]) == Decimal("1539.99")
 
 
-async def test_spending_by_category(seeded, aexecute):
+async def test_spending_by_category(seeded: dict[str, str], aexecute: AExecute) -> None:
     result = await aexecute(
         'query { spendingByCategory(dateFrom: "2026-06-01", dateTo: "2026-09-30") { category { name } expense income count } }'
     )
@@ -85,7 +88,7 @@ async def test_spending_by_category(seeded, aexecute):
     assert Decimal(by_name[None]["income"]) == Decimal("12000.00")
 
 
-async def test_top_counterparties(seeded, aexecute):
+async def test_top_counterparties(seeded: dict[str, str], aexecute: AExecute) -> None:
     result = await aexecute(
         'query { topCounterparties(dateFrom: "2026-06-01", limit: 2) { counterparty total count } }'
     )
@@ -96,7 +99,9 @@ async def test_top_counterparties(seeded, aexecute):
     assert Decimal(result.data["topCounterparties"][0]["total"]) == Decimal("3600.00")
 
 
-async def test_balance_history_walks_back_from_the_reported_balance(seeded, aexecute):
+async def test_balance_history_walks_back_from_the_reported_balance(
+    seeded: dict[str, str], aexecute: AExecute
+) -> None:
     result = await aexecute(
         'query($a: ID!) { balanceHistory(account: $a, dateFrom: "2026-09-19") { date amount reported } }',
         {"a": seeded["giro"]},
@@ -112,7 +117,9 @@ async def test_balance_history_walks_back_from_the_reported_balance(seeded, aexe
     assert Decimal(points["2026-09-20"]["amount"]) == Decimal("4000.00")
 
 
-async def test_budget_status_rolls_up_children(seeded, aexecute):
+async def test_budget_status_rolls_up_children(
+    seeded: dict[str, str], aexecute: AExecute
+) -> None:
     child = await aexecute(
         'mutation($p: ID!) { createCategory(input: {name: "Snacks", parent: $p}) { id } }',
         {"p": seeded["groceries"]},
@@ -141,7 +148,9 @@ async def test_budget_status_rolls_up_children(seeded, aexecute):
     assert status["ratio"] == pytest.approx(1.2)
 
 
-async def test_budget_status_of_one_category(seeded, aexecute):
+async def test_budget_status_of_one_category(
+    seeded: dict[str, str], aexecute: AExecute
+) -> None:
     fun = (
         await aexecute('mutation { createCategory(input: {name: "Fun"}) { id } }')
     ).data["createCategory"]["id"]
@@ -159,7 +168,9 @@ async def test_budget_status_of_one_category(seeded, aexecute):
     assert [s["budget"]["category"]["id"] for s in one] == [fun]
 
 
-async def test_recurring_detection_and_forecast(seeded, aexecute):
+async def test_recurring_detection_and_forecast(
+    seeded: dict[str, str], aexecute: AExecute
+) -> None:
     result = await aexecute(
         "mutation { detectRecurring { id label amount intervalDays nextExpected status } }"
     )
@@ -196,7 +207,7 @@ async def test_recurring_detection_and_forecast(seeded, aexecute):
     assert len(points) == horizon + 1
     rent_days = [
         p["date"]
-        for prev, p in zip(points, points[1:])
+        for prev, p in zip(points, points[1:], strict=False)
         if Decimal(p["amount"]) - Decimal(prev["amount"]) == Decimal("-900.00")
     ]
     assert rent_days, points
@@ -206,7 +217,9 @@ async def test_recurring_detection_and_forecast(seeded, aexecute):
     days = [datetime.date.fromisoformat(d) for d in rent_days]
     on_rhythm = [d for d in days if (d - first_due).days % 30 == 0]
     assert on_rhythm, points
-    assert all((b - a).days == 30 for a, b in zip(on_rhythm, on_rhythm[1:]))
+    assert all(
+        (b - a).days == 30 for a, b in zip(on_rhythm, on_rhythm[1:], strict=False)
+    )
     assert [d for d in days if d not in on_rhythm] in (
         [],
         [TODAY + datetime.timedelta(days=1)],

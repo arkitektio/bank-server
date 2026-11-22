@@ -31,7 +31,7 @@ import io
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -137,7 +137,7 @@ def is_iban(value: str | None) -> bool:
     return bool(normalized and _IBAN.match(normalized))
 
 
-def _text(value: Any) -> str | None:  # noqa: ANN401 - a cell
+def _text(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, float) and value.is_integer():
@@ -146,7 +146,7 @@ def _text(value: Any) -> str | None:  # noqa: ANN401 - a cell
     return text or None
 
 
-def _decimal(value: Any, what: str) -> Decimal | None:  # noqa: ANN401
+def _decimal(value: object, what: str) -> Decimal | None:
     if value is None or value == "":
         return None
     if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
@@ -178,7 +178,7 @@ def _decimal(value: Any, what: str) -> Decimal | None:  # noqa: ANN401
         raise ExportError(f"{what}: {value!r} is not an amount.") from error
 
 
-def _date(value: Any, what: str) -> date:  # noqa: ANN401
+def _date(value: object, what: str) -> date:
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
@@ -193,20 +193,24 @@ def _date(value: Any, what: str) -> date:  # noqa: ANN401
             "%Y-%m-%dT%H:%M:%S",
         ):
             try:
-                return datetime.strptime(text[:19] if "T" in text else text, fmt).date()
+                return (
+                    datetime.strptime(text[:19] if "T" in text else text, fmt)
+                    .replace(tzinfo=UTC)  # a day: no zone in the file, none needed
+                    .date()
+                )
             except ValueError:
                 continue
     raise ExportError(f"{what}: {value!r} is not a date.")
 
 
-def _bool(value: Any) -> bool:  # noqa: ANN401
+def _bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
     text = _text(value)
     return bool(text) and text.casefold() in TRUE
 
 
-def _json_safe(value: Any) -> Any:  # noqa: ANN401
+def _json_safe(value: object) -> object:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, Decimal):
@@ -271,7 +275,7 @@ def parse(content: bytes) -> ParsedExport:
     if missing:
         warnings.append(f"Columns missing from the file: {', '.join(missing)}.")
 
-    def cell(row: list[Any], name: str) -> Any:  # noqa: ANN401
+    def cell(row: list[object], name: str) -> object:
         position = columns.get(name)
         return row[position] if position is not None and position < len(row) else None
 
@@ -303,9 +307,13 @@ def parse(content: bytes) -> ParsedExport:
         }
         if party_iban and not is_iban(party_iban):
             extra["counterparty_account"] = party_iban
-        for name in unknown:
-            if (value := cell(raw, name)) not in (None, ""):
-                extra.setdefault("other", {})[name] = _json_safe(value)
+        other = {
+            name: _json_safe(value)
+            for name in unknown
+            if (value := cell(raw, name)) not in (None, "")
+        }
+        if other:
+            extra["other"] = other
         original = _text(cell(raw, "Referenz-Original-ID"))
         rows.append(
             FgRow(

@@ -7,10 +7,12 @@
 import asyncio
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 import pytest
 from django.utils import timezone
+from kante.context import HttpContext
 
 from bank_server.schema import schema
 from finance import models
@@ -20,20 +22,29 @@ from tests.conftest import (
     SCALABLE_COMPLETE,
     SCALABLE_START,
     SESSION,
+    AExecute,
+    FakeBank,
+    FakeScalable,
     account,
     connection_of,
+    error_of,
+    extensions_of,
 )
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-READ = "query($s: String!) { authSession(state: $s) { %s } }" % SESSION
-RESUME = "mutation($s: String!) { resumeAuth(state: $s) { %s } }" % SESSION
-CANCEL = "mutation($s: String!) { cancelAuth(state: $s) { %s } }" % SESSION
+READ = "query($s: String!) { authSession(state: $s) { " + SESSION + " } }"
+RESUME = "mutation($s: String!) { resumeAuth(state: $s) { " + SESSION + " } }"
+CANCEL = "mutation($s: String!) { cancelAuth(state: $s) { " + SESSION + " } }"
 PENDING_AUTH = "{ bankConnections(filters: {status: PENDING}) { id pendingAuth { state openUrl status } } }"
 
 
+#: Starts a login at this test's fake bank; returns its session.
+Started = Callable[[], Awaitable[dict]]
+
+
 @pytest.fixture
-def started(aexecute, fakebank, eb_provider):
+def started(aexecute: AExecute, fakebank: FakeBank, eb_provider: str) -> Started:
     """A login tenant A's user started at this test's fake bank (its session)."""
 
     async def _start() -> dict:
@@ -45,7 +56,7 @@ def started(aexecute, fakebank, eb_provider):
     return _start
 
 
-def _exchanges(fakebank, since: int) -> int:
+def _exchanges(fakebank: FakeBank, since: int) -> int:
     return len(
         [
             e
@@ -58,7 +69,9 @@ def _exchanges(fakebank, since: int) -> int:
 # --- the two ways to finish --------------------------------------------------------------------
 
 
-async def test_a_redirect_login_from_start_to_done(aexecute, fakebank, started):
+async def test_a_redirect_login_from_start_to_done(
+    aexecute: AExecute, fakebank: FakeBank, started: Started
+) -> None:
     session = await started()
     read = (await aexecute(READ, {"s": session["state"]})).data["authSession"]
 
@@ -94,8 +107,8 @@ async def test_a_redirect_login_from_start_to_done(aexecute, fakebank, started):
 
 
 async def test_a_poll_login_steps_through_the_second_factor(
-    aexecute, fakescalable, sc_provider
-):
+    aexecute: AExecute, fakescalable: FakeScalable, sc_provider: str
+) -> None:
     fakescalable.seed({"p1": {"cash": 1}}, mfa=True)
     fakescalable.config(interval=3)
     session = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data[
@@ -125,7 +138,7 @@ async def test_a_poll_login_steps_through_the_second_factor(
     )
 
 
-async def test_a_state_is_long_enough_to_be_unguessable(started):
+async def test_a_state_is_long_enough_to_be_unguessable(started: Started) -> None:
     session = await started()
 
     assert len(session["state"]) >= 43  # 32 random bytes, url-safe
@@ -135,8 +148,8 @@ async def test_a_state_is_long_enough_to_be_unguessable(started):
 
 
 async def test_completing_a_finished_login_again_answers_the_same_and_exchanges_nothing(
-    aexecute, fakebank, started
-):
+    aexecute: AExecute, fakebank: FakeBank, started: Started
+) -> None:
     session = await started()
     code = fakebank.approve(session["state"])
     seen = len(fakebank.log())
@@ -156,8 +169,11 @@ async def test_completing_a_finished_login_again_answers_the_same_and_exchanges_
 
 
 async def test_two_completions_at_once_exchange_the_code_once(
-    aexecute, authenticated_context, fakebank, started
-):
+    aexecute: AExecute,
+    authenticated_context: HttpContext,
+    fakebank: FakeBank,
+    started: Started,
+) -> None:
     """The callback page and a pasted redirect race: a real second thread, parked mid-exchange at the bank."""
     session = await started()
     variables = {"code": fakebank.approve(session["state"]), "state": session["state"]}
@@ -203,7 +219,9 @@ async def test_two_completions_at_once_exchange_the_code_once(
     )
 
 
-async def test_a_code_the_bank_refuses_ends_the_login_as_failed(aexecute, started):
+async def test_a_code_the_bank_refuses_ends_the_login_as_failed(
+    aexecute: AExecute, started: Started
+) -> None:
     session = await started()
 
     failed = (
@@ -219,8 +237,8 @@ async def test_a_code_the_bank_refuses_ends_the_login_as_failed(aexecute, starte
 
 
 async def test_the_providers_refusal_is_recorded_in_its_words(
-    aexecute, fakebank, started
-):
+    aexecute: AExecute, fakebank: FakeBank, started: Started
+) -> None:
     session = await started()
     seen = len(fakebank.log())
 
@@ -250,8 +268,8 @@ async def test_the_providers_refusal_is_recorded_in_its_words(
 
 
 async def test_a_denied_second_factor_is_failed_on_every_later_call(
-    aexecute, fakescalable, sc_provider
-):
+    aexecute: AExecute, fakescalable: FakeScalable, sc_provider: str
+) -> None:
     fakescalable.seed({"p1": {"cash": 1}}, mfa=True)
     session = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data[
         "startLink"
@@ -277,8 +295,8 @@ async def test_a_denied_second_factor_is_failed_on_every_later_call(
 
 
 async def test_a_throttled_provider_does_not_end_a_login(
-    aexecute, fakescalable, sc_provider
-):
+    aexecute: AExecute, fakescalable: FakeScalable, sc_provider: str
+) -> None:
     """One bad answer while the login waits for the phone is an error of that call, not of the login."""
     fakescalable.seed({"p1": {"cash": 1}}, mfa=True)
     session = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data[
@@ -297,7 +315,7 @@ async def test_a_throttled_provider_does_not_end_a_login(
         "completeAuth"
     ]
 
-    assert throttled.errors[0].extensions["code"] == "RATE_LIMITED"
+    assert extensions_of(throttled)["code"] == "RATE_LIMITED"
     assert (read["status"], read["step"]) == ("PENDING", "MFA")
     assert done["status"] == "DONE"
 
@@ -305,7 +323,9 @@ async def test_a_throttled_provider_does_not_end_a_login(
 # --- running out -------------------------------------------------------------------------------
 
 
-async def test_a_login_nobody_approved_in_time_is_expired(aexecute, fakebank, started):
+async def test_a_login_nobody_approved_in_time_is_expired(
+    aexecute: AExecute, fakebank: FakeBank, started: Started
+) -> None:
     session = await started()
     code = fakebank.approve(session["state"])
     seen = len(fakebank.log())
@@ -331,8 +351,8 @@ async def test_a_login_nobody_approved_in_time_is_expired(aexecute, fakebank, st
 
 
 async def test_a_login_waiting_for_its_second_factor_outlives_the_code(
-    aexecute, fakescalable, sc_provider
-):
+    aexecute: AExecute, fakescalable: FakeScalable, sc_provider: str
+) -> None:
     fakescalable.seed({"p1": {"cash": 1}}, mfa=True)
     session = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data[
         "startLink"
@@ -358,8 +378,13 @@ async def test_a_login_waiting_for_its_second_factor_outlives_the_code(
 
 @pytest.mark.parametrize("who", ["colleague_context", "other_org_context"])
 async def test_only_who_started_a_login_reaches_it(
-    aexecute, fakebank, started, who, colleague_context, other_org_context
-):
+    aexecute: AExecute,
+    fakebank: FakeBank,
+    started: Started,
+    who: str,
+    colleague_context: HttpContext,
+    other_org_context: HttpContext,
+) -> None:
     """Another member of the organization, and another organization, get what an unknown state gets."""
     stranger = {
         "colleague_context": colleague_context,
@@ -389,8 +414,8 @@ async def test_only_who_started_a_login_reaches_it(
     unknown = await aexecute(READ, {"s": "not-a-state"}, allow_errors=True)
     still = (await aexecute(READ, {"s": session["state"]})).data["authSession"]
 
-    assert [a.errors[0].extensions["code"] for a in answers] == ["INVALID_STATE"] * 4
-    assert [a.errors[0].message for a in answers] == [unknown.errors[0].message] * 4
+    assert [extensions_of(a)["code"] for a in answers] == ["INVALID_STATE"] * 4
+    assert [error_of(a).message for a in answers] == [error_of(unknown).message] * 4
     assert still["status"] == "PENDING" and _exchanges(fakebank, seen) == 0
 
 
@@ -398,8 +423,8 @@ async def test_only_who_started_a_login_reaches_it(
 
 
 async def test_a_pending_login_is_offered_on_its_connection_to_who_started_it(
-    aexecute, colleague_context, started
-):
+    aexecute: AExecute, colleague_context: HttpContext, started: Started
+) -> None:
     session = await started()
 
     mine = (await aexecute(PENDING_AUTH)).data["bankConnections"]
@@ -418,8 +443,8 @@ async def test_a_pending_login_is_offered_on_its_connection_to_who_started_it(
 
 
 async def test_cancel_is_idempotent_and_the_login_can_still_be_read(
-    aexecute, fakebank, started
-):
+    aexecute: AExecute, fakebank: FakeBank, started: Started
+) -> None:
     session = await started()
     code = fakebank.approve(session["state"])
     seen = len(fakebank.log())
@@ -441,7 +466,9 @@ async def test_cancel_is_idempotent_and_the_login_can_still_be_read(
     assert listed == [] and _exchanges(fakebank, seen) == 0
 
 
-async def test_cancelling_a_finished_login_changes_nothing(aexecute, fakebank, started):
+async def test_cancelling_a_finished_login_changes_nothing(
+    aexecute: AExecute, fakebank: FakeBank, started: Started
+) -> None:
     session = await started()
     done = (
         await aexecute(
@@ -457,8 +484,8 @@ async def test_cancelling_a_finished_login_changes_nothing(aexecute, fakebank, s
 
 
 async def test_cancelling_a_login_waiting_for_its_second_factor_logs_it_out(
-    aexecute, fakescalable, sc_provider
-):
+    aexecute: AExecute, fakescalable: FakeScalable, sc_provider: str
+) -> None:
     fakescalable.seed({"p1": {"cash": 1}}, mfa=True)
     session = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data[
         "startLink"

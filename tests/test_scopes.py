@@ -7,7 +7,7 @@ from arkitekt_service.graphql import scope_gaps
 from kante.context import HttpContext
 
 from bank_server.schema import schema
-from tests.conftest import _context
+from tests.conftest import AExecute, _context, extensions_of
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -16,23 +16,25 @@ CATEGORIES = "query { categories { id } }"
 
 
 @pytest.fixture
-def reader_context(transactional_db) -> HttpContext:
+def reader_context(transactional_db: None) -> HttpContext:
     """The ``test`` user of tenant A, through an app granted only ``bank_read``."""
     return _context("readertest", "1", "static_org")
 
 
-def test_every_root_field_asks_for_a_scope_bank_declares():
+def test_every_root_field_asks_for_a_scope_bank_declares() -> None:
     assert scope_gaps(schema) == []
 
 
-async def test_an_app_granted_reads_reads_and_writes_nothing(aexecute, reader_context):
+async def test_an_app_granted_reads_reads_and_writes_nothing(
+    aexecute: AExecute, reader_context: HttpContext
+) -> None:
     await aexecute(CATEGORIES, context=reader_context)
     refused = await aexecute(MAKE_CATEGORY, context=reader_context, allow_errors=True)
 
-    assert refused.errors[0].extensions["reason"] == "INSUFFICIENT_SCOPE"
+    assert extensions_of(refused)["reason"] == "INSUFFICIENT_SCOPE"
 
 
-async def test_the_all_scope_writes(aexecute):
+async def test_the_all_scope_writes(aexecute: AExecute) -> None:
     made = await aexecute(MAKE_CATEGORY)
 
     assert made.data["createCategory"]["id"]

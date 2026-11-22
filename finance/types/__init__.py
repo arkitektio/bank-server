@@ -7,7 +7,7 @@ on the wire), never ``Float`` or ``Int``.
 
 import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, Optional
 
 import kante
 import strawberry
@@ -282,7 +282,7 @@ class BankConnection(OrgScoped):
     organization: Organization
 
     @classmethod
-    def get_queryset(cls, queryset, info, **kwargs):  # noqa: ANN001, ANN003, ANN206
+    def get_queryset(cls, queryset: QuerySet, info: Info, **kwargs: Any) -> QuerySet:
         # A cancelled login is kept only so `authSession` can still answer for it.
         return (
             super()

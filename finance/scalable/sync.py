@@ -17,9 +17,11 @@ count. The flag is the provider's (``kind`` is set), so IBAN-based transfer dete
 these rows alone.
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from django.db import transaction as db_transaction
 from django.utils import timezone
@@ -29,6 +31,9 @@ from finance import models
 from finance.scalable.client import ScalableClient
 from finance.scalable.tokens import Session
 from finance.semantic import embed_rows
+
+if TYPE_CHECKING:
+    from finance.sync import SyncResult  # it imports this module
 
 PAGE_SIZE = 50
 MAX_PAGES = 200
@@ -86,7 +91,7 @@ class Fetched:
     holdings: list[dict] | None = None
 
 
-def _decimal(value) -> Decimal | None:  # noqa: ANN001
+def _decimal(value: Decimal | float | str | None) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
 
@@ -141,7 +146,9 @@ def normalize(tx: dict) -> dict:
     }
 
 
-async def _page_back(fetch_page, since: date | None) -> list[dict]:  # noqa: ANN001
+async def _page_back(
+    fetch_page: Callable[[str | None], Awaitable[dict]], since: date | None
+) -> list[dict]:
     """Every transaction from newest back to ``since`` (all of them if None)."""
     out: list[dict] = []
     cursor = None
@@ -276,7 +283,7 @@ def _holding(item: dict) -> dict | None:
     }
 
 
-def persist(syncer_id: int, fetched: Fetched, result) -> None:  # noqa: ANN001 - finance.sync.SyncResult
+def persist(syncer_id: int, fetched: Fetched, result: "SyncResult") -> None:
     """Write one fetch in a single transaction; fills in ``result``."""
     from bank_server.service import service  # it imports finance.models
     from finance.sync import categorize_rows, mark_synced, take_over_imported

@@ -23,7 +23,7 @@ AUTH_RECHECK_SECONDS = 10.0
 
 
 async def account_syncs(
-    self, info: Info, account: strawberry.ID | None = None
+    self: object, info: Info, account: strawberry.ID | None = None
 ) -> AsyncGenerator[types.AccountSyncEvent, None]:
     """Stream an event whenever one of this organization's accounts finished syncing (only `account`, when given)."""
     group = org_group(info.context.request.organization.id)
@@ -48,7 +48,7 @@ def _key(session: auth_sessions.AuthSession) -> tuple[object, ...]:
 
 
 async def auth_session(
-    self, info: Info, state: str
+    self: object, info: Info, state: str
 ) -> AsyncGenerator[types.AuthSession, None]:
     """The login as it is now, then again whenever it changes, until it is no longer PENDING. Only its starter may watch it."""
     request = info.context.request

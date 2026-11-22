@@ -7,9 +7,10 @@ which makes a mismatch fail the boot rather than the first search.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
-from django.apps import apps
+from django.apps import AppConfig, apps
 from django.core.checks import Error, Tags, Warning, register
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connections
@@ -28,7 +29,9 @@ def embedded_models() -> list[type[EmbeddedDescriptionMixin]]:
 
 
 @register(Tags.compatibility)
-def check_model_dimensions(app_configs: Any, **kwargs: Any) -> list[Error | Warning]:
+def check_model_dimensions(
+    app_configs: Sequence[AppConfig] | None, **kwargs: Any
+) -> list[Error | Warning]:
     """``embeddings.E001``: the model does not produce ``EMBEDDINGS.DIMENSIONS``-wide vectors."""
     if not engine.enabled():
         return []
@@ -50,7 +53,9 @@ def check_model_dimensions(app_configs: Any, **kwargs: Any) -> list[Error | Warn
 
 @register(Tags.database)
 def check_column_dimensions(
-    app_configs: Any, databases: Any = None, **kwargs: Any
+    app_configs: Sequence[AppConfig] | None,
+    databases: Sequence[str] | None = None,
+    **kwargs: Any,
 ) -> list[Error]:
     """``embeddings.E002``: a ``vector(N)`` column whose N is not ``EMBEDDINGS.DIMENSIONS``.
 

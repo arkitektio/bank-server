@@ -3,13 +3,17 @@
 import boto3
 import pytest
 from arkitekt_datalayer import models as dl_models
+from arkitekt_datalayer.datalayer import Datalayer
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from kante.context import HttpContext
 
-from .conftest import REQUEST_UPLOAD
+from .conftest import REQUEST_UPLOAD, AExecute, Stack, Upload
 
 
-async def test_upload_round_trip(upload, datalayer, authenticated_context):
+async def test_upload_round_trip(
+    upload: Upload, datalayer: Datalayer, authenticated_context: HttpContext
+) -> None:
     store_id = await upload(b"Buchungstag;Betrag\n", name="export.csv")
 
     store = await dl_models.BigFileStore.objects.aget(id=store_id)
@@ -20,7 +24,9 @@ async def test_upload_round_trip(upload, datalayer, authenticated_context):
     assert datalayer.read_object(store.bucket, store.key) == b"Buchungstag;Betrag\n"
 
 
-async def test_a_grant_writes_only_its_own_key(aexecute, datalayer, backend_stack):
+async def test_a_grant_writes_only_its_own_key(
+    aexecute: AExecute, datalayer: Datalayer, backend_stack: Stack
+) -> None:
     grant = (await aexecute(REQUEST_UPLOAD, {"name": "a.xlsx", "size": 3})).data[
         "requestBigfileUpload"
     ]

@@ -23,6 +23,7 @@ import uuid
 
 import jwt
 from aiohttp import web
+from aiohttp.typedefs import Handler
 
 PAGE_SIZE = 3
 
@@ -47,7 +48,7 @@ def _error(status: int, code: str, message: str = "") -> web.Response:
 
 
 @web.middleware
-async def verify_jwt(request: web.Request, handler):  # noqa: ANN001, ANN201
+async def verify_jwt(request: web.Request, handler: Handler) -> web.StreamResponse:
     if request.path.startswith("/_admin"):
         return await handler(request)
     auth = request.headers.get("Authorization", "")

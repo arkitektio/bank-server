@@ -8,9 +8,20 @@ import datetime
 
 import pytest
 from django.utils import timezone
+from kante.context import HttpContext
+from pytest_django.fixtures import SettingsWrapper
 
 from finance import models
-from tests.conftest import TWELVEDATA_KEY, holding, trade
+from tests.conftest import (
+    TWELVEDATA_KEY,
+    AExecute,
+    FakeMarket,
+    FakeScalable,
+    Link,
+    extensions_of,
+    holding,
+    trade,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -55,7 +66,9 @@ REFRESH = "mutation($f: Date) { refreshSecurityPrices(dateFrom: $f) { isin sourc
 SERIES = 'query($s: PriceSource) { securityPrices(isin: "IE00TEST0001", priceSource: $s) { source symbol currency points { date close } } }'
 
 
-async def _depot(scalable_link, aexecute, fakescalable) -> dict:  # noqa: ANN001
+async def _depot(
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> dict:
     fakescalable.seed(
         {
             "p1": {
@@ -78,8 +91,11 @@ async def _depot(scalable_link, aexecute, fakescalable) -> dict:  # noqa: ANN001
 
 
 async def test_a_depot_sync_stores_scalables_recent_prices(
-    scalable_link, aexecute, fakescalable, fakemarket
-):
+    scalable_link: Link,
+    aexecute: AExecute,
+    fakescalable: FakeScalable,
+    fakemarket: FakeMarket,
+) -> None:
     await _depot(scalable_link, aexecute, fakescalable)
 
     series = (await aexecute(SERIES)).data["securityPrices"]
@@ -95,8 +111,12 @@ async def test_a_depot_sync_stores_scalables_recent_prices(
 
 
 async def test_listings_resolve_through_openfigi_with_the_preferred_exchange(
-    scalable_link, aexecute, fakescalable, fakemarket, settings
-):
+    scalable_link: Link,
+    aexecute: AExecute,
+    fakescalable: FakeScalable,
+    fakemarket: FakeMarket,
+    settings: SettingsWrapper,
+) -> None:
     settings.PRICES = {**settings.PRICES, "twelvedata_api_key": TWELVEDATA_KEY}
     fakemarket.listings(FIGI)
     await _depot(scalable_link, aexecute, fakescalable)
@@ -127,8 +147,12 @@ async def test_listings_resolve_through_openfigi_with_the_preferred_exchange(
 
 
 async def test_refresh_fetches_every_source_and_is_idempotent(
-    scalable_link, aexecute, fakescalable, fakemarket, settings
-):
+    scalable_link: Link,
+    aexecute: AExecute,
+    fakescalable: FakeScalable,
+    fakemarket: FakeMarket,
+    settings: SettingsWrapper,
+) -> None:
     settings.PRICES = {**settings.PRICES, "twelvedata_api_key": TWELVEDATA_KEY}
     fakemarket.listings(FIGI)
     fakemarket.series({**YAHOO, **TWELVE})
@@ -158,8 +182,12 @@ async def test_refresh_fetches_every_source_and_is_idempotent(
 
 
 async def test_sources_fall_back_in_preference_order_and_a_missing_key_skips_twelve_data(
-    scalable_link, aexecute, fakescalable, fakemarket, settings
-):
+    scalable_link: Link,
+    aexecute: AExecute,
+    fakescalable: FakeScalable,
+    fakemarket: FakeMarket,
+    settings: SettingsWrapper,
+) -> None:
     settings.PRICES = {
         **settings.PRICES,
         "sources": ["TWELVEDATA", "YAHOO", "SCALABLE"],
@@ -176,8 +204,11 @@ async def test_sources_fall_back_in_preference_order_and_a_missing_key_skips_twe
 
 
 async def test_a_pinned_listing_is_never_re_resolved(
-    scalable_link, aexecute, fakescalable, fakemarket
-):
+    scalable_link: Link,
+    aexecute: AExecute,
+    fakescalable: FakeScalable,
+    fakemarket: FakeMarket,
+) -> None:
     fakemarket.listings(FIGI)
     fakemarket.series(
         {"YAHOO:VWRA.L": {"currency": "USD", "points": [[day(-1), 150.0]]}}
@@ -199,8 +230,11 @@ async def test_a_pinned_listing_is_never_re_resolved(
 
 
 async def test_quotes_come_live_from_the_first_source_that_answers(
-    scalable_link, aexecute, fakescalable, fakemarket
-):
+    scalable_link: Link,
+    aexecute: AExecute,
+    fakescalable: FakeScalable,
+    fakemarket: FakeMarket,
+) -> None:
     fakemarket.listings(FIGI)
     fakemarket.series(YAHOO)
     await _depot(scalable_link, aexecute, fakescalable)
@@ -233,12 +267,15 @@ async def test_quotes_come_live_from_the_first_source_that_answers(
         "price": "209.0",
         "name": "Vanguard FTSE All-World",
     }
-    assert unknown.errors[0].extensions["code"] == "NOT_FOUND"
+    assert extensions_of(unknown)["code"] == "NOT_FOUND"
 
 
 async def test_the_depot_value_is_daily_from_positions_and_prices(
-    scalable_link, aexecute, fakescalable, fakemarket
-):
+    scalable_link: Link,
+    aexecute: AExecute,
+    fakescalable: FakeScalable,
+    fakemarket: FakeMarket,
+) -> None:
     await _depot(
         scalable_link, aexecute, fakescalable
     )  # bought 5 at T−8 and 5 at T−4; holds 10 today
@@ -282,8 +319,12 @@ async def test_the_depot_value_is_daily_from_positions_and_prices(
 
 
 async def test_listings_and_series_stay_in_the_organization(
-    scalable_link, aexecute, fakescalable, fakemarket, other_org_context
-):
+    scalable_link: Link,
+    aexecute: AExecute,
+    fakescalable: FakeScalable,
+    fakemarket: FakeMarket,
+    other_org_context: HttpContext,
+) -> None:
     await _depot(scalable_link, aexecute, fakescalable)
 
     theirs = (
@@ -300,5 +341,5 @@ async def test_listings_and_series_stay_in_the_organization(
         theirs == [] and series["points"] == []
     )  # the prices exist, but no listing of theirs points at them
     assert (
-        quote.errors[0].extensions["code"] == "NOT_FOUND"
+        extensions_of(quote)["code"] == "NOT_FOUND"
     )  # no Scalable login in that organization

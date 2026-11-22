@@ -8,9 +8,22 @@ import datetime
 
 import pytest
 from django.utils import timezone
+from kante.context import HttpContext
 
 from finance import models
-from tests.conftest import account, cash, holding, trade, tx
+from tests.conftest import (
+    AExecute,
+    FakeBank,
+    FakeGeo,
+    FakeScalable,
+    Link,
+    account,
+    cash,
+    extensions_of,
+    holding,
+    trade,
+    tx,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -28,7 +41,12 @@ ROWS = [
 ]
 
 
-async def _setup(link, aexecute, fakebank, context=None) -> dict:  # noqa: ANN001
+async def _setup(
+    link: Link,
+    aexecute: AExecute,
+    fakebank: FakeBank,
+    context: HttpContext | None = None,
+) -> dict:
     fakebank.scenario(
         [
             account(
@@ -55,7 +73,9 @@ async def _setup(link, aexecute, fakebank, context=None) -> dict:  # noqa: ANN00
     return {"account": acc}
 
 
-async def test_merchant_insights(link, aexecute, fakebank):
+async def test_merchant_insights(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _setup(link, aexecute, fakebank)
 
     got = (
@@ -119,7 +139,9 @@ async def test_merchant_insights(link, aexecute, fakebank):
     ]  # Hofer (25) is Groceries too
 
 
-async def test_category_insights_roll_up_children(link, aexecute, fakebank):
+async def test_category_insights_roll_up_children(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _setup(link, aexecute, fakebank)
     food = str((await models.Category.objects.aget(key="food")).id)
     await aexecute(
@@ -156,7 +178,9 @@ async def test_category_insights_roll_up_children(link, aexecute, fakebank):
     assert got["budgets"] == [{"budgeted": "200.00"}]
 
 
-async def test_period_overview(link, aexecute, fakebank):
+async def test_period_overview(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _setup(link, aexecute, fakebank)
 
     got = (
@@ -216,8 +240,12 @@ async def test_period_overview(link, aexecute, fakebank):
 
 
 async def test_area_insights_and_spending_grid(
-    link, aexecute, fakebank, fakegeo, other_org_context
-):
+    link: Link,
+    aexecute: AExecute,
+    fakebank: FakeBank,
+    fakegeo: FakeGeo,
+    other_org_context: HttpContext,
+) -> None:
     fakegeo.places(
         [
             {
@@ -304,7 +332,9 @@ async def test_area_insights_and_spending_grid(
     assert place == {"totals": [{"expense": "40.00"}], "visits": {"visits": 1}}
 
 
-async def test_account_insights(link, aexecute, fakebank):
+async def test_account_insights(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     ids = await _setup(link, aexecute, fakebank)
 
     got = (
@@ -331,7 +361,9 @@ async def test_account_insights(link, aexecute, fakebank):
     assert [m["merchant"]["key"] for m in got["topMerchants"]] == ["spar", "mcdonalds"]
 
 
-async def test_recurring_insights(link, aexecute, fakebank):
+async def test_recurring_insights(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _setup(link, aexecute, fakebank)
     acc = await models.BankAccount.objects.afirst()
     today = timezone.now().date()
@@ -406,7 +438,9 @@ async def test_recurring_insights(link, aexecute, fakebank):
     assert detected["monthlyCommitted"] == [{"count": 3}]
 
 
-async def test_portfolio_insights(scalable_link, aexecute, fakescalable):
+async def test_portfolio_insights(
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed(
         {
             "p1": {
@@ -459,8 +493,8 @@ async def test_portfolio_insights(scalable_link, aexecute, fakescalable):
 
 
 async def test_views_resolve_only_in_the_callers_organization(
-    link, aexecute, fakebank, other_org_context
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, other_org_context: HttpContext
+) -> None:
     ids = await _setup(link, aexecute, fakebank)
     food = str(
         (
@@ -484,7 +518,7 @@ async def test_views_resolve_only_in_the_callers_organization(
         result = await aexecute(
             query, variables, context=other_org_context, allow_errors=True
         )
-        assert result.errors[0].extensions["code"] == "NOT_FOUND", query
+        assert extensions_of(result)["code"] == "NOT_FOUND", query
     overview = (
         await aexecute(
             "query($w: StatsWindowInput) { periodOverview(window: $w) { totals { count } } }",

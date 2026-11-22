@@ -2,17 +2,19 @@
 
 import uuid
 
+from kante.context import HttpContext
+
 from finance import models
 
-from .conftest import account, tx
+from .conftest import AExecute, FakeBank, Link, account, extensions_of, tx
 
 SYNC = "mutation Sync($id: ID!) { syncAccount(id: $id) { created account { id lastSyncedAt isImportOnly syncers { backend lastSyncedAt } } } }"
 ACCOUNT = "query($id: ID!) { bankAccount(id: $id) { id isImportOnly connection { id } syncers { backend connection { id } } } }"
 
 
 async def test_a_linked_account_has_one_syncer_and_syncs_through_it(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account(transactions=[tx("-3.00", "2026-09-02", "Shop")])])
     connection = await link()
     acc_id = connection["accounts"][0]["id"]
@@ -32,8 +34,11 @@ async def test_a_linked_account_has_one_syncer_and_syncs_through_it(
 
 
 async def test_relink_adopts_an_account_known_only_by_iban(
-    link, aexecute, fakebank, authenticated_context
-):
+    link: Link,
+    aexecute: AExecute,
+    fakebank: FakeBank,
+    authenticated_context: HttpContext,
+) -> None:
     """An account without syncers (e.g. from an import) is adopted by IBAN + currency instead of duplicated."""
     org = authenticated_context.request.organization
     iban = f"AT{uuid.uuid4().int % 10**18:018d}"
@@ -54,8 +59,8 @@ async def test_relink_adopts_an_account_known_only_by_iban(
 
 
 async def test_relink_does_not_adopt_when_the_iban_is_ambiguous(
-    link, fakebank, authenticated_context
-):
+    link: Link, fakebank: FakeBank, authenticated_context: HttpContext
+) -> None:
     org = authenticated_context.request.organization
     iban = f"AT{uuid.uuid4().int % 10**18:018d}"
     for name in ("Pocket A", "Pocket B"):
@@ -72,7 +77,9 @@ async def test_relink_does_not_adopt_when_the_iban_is_ambiguous(
     }
 
 
-async def test_two_consented_accounts_with_one_iban_stay_two(link, fakebank):
+async def test_two_consented_accounts_with_one_iban_stay_two(
+    link: Link, fakebank: FakeBank
+) -> None:
     """Currency pockets or sub-accounts a bank reports under one IBAN: the second must not adopt the first."""
     iban = f"AT{uuid.uuid4().int % 10**18:018d}"
     fakebank.scenario(
@@ -90,8 +97,8 @@ async def test_two_consented_accounts_with_one_iban_stay_two(link, fakebank):
 
 
 async def test_an_account_without_syncers_is_import_only_and_refuses_sync(
-    aexecute, authenticated_context
-):
+    aexecute: AExecute, authenticated_context: HttpContext
+) -> None:
     acc = await models.BankAccount.objects.acreate(
         organization=authenticated_context.request.organization,
         currency="EUR",
@@ -100,7 +107,7 @@ async def test_an_account_without_syncers_is_import_only_and_refuses_sync(
 
     result = await aexecute(SYNC, {"id": acc.id}, allow_errors=True)
 
-    assert result.errors[0].extensions["code"] == "CONNECTION_INACTIVE"
+    assert extensions_of(result)["code"] == "CONNECTION_INACTIVE"
     assert (await aexecute(ACCOUNT, {"id": acc.id})).data["bankAccount"] == {
         "id": str(acc.id),
         "isImportOnly": True,

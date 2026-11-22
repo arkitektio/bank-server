@@ -134,7 +134,7 @@ class EnableBankingClient:
         json: dict | None = None,
         params: dict | None = None,
         psu_headers: dict[str, str] | None = None,
-    ) -> Any:
+    ) -> dict[str, Any] | None:
         assert self._session is not None, (
             "use `async with EnableBankingClient(config) as client`"
         )

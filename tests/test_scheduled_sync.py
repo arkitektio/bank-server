@@ -15,12 +15,14 @@ from asgiref.sync import sync_to_async
 from django.test import Client as HttpClient
 from django.utils import timezone
 from joserfc.jwk import OKPKey
+from kante.context import HttpContext
+from pytest_django.fixtures import SettingsWrapper
 
 from bank_server.hook_agent import agent
 from bank_server.service import service
 from finance import models
 from finance.scheduled import sync_all_accounts
-from tests.conftest import account, tx
+from tests.conftest import FakeBank, Link, account, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -29,7 +31,7 @@ REKUEST_KEY = OKPKey.generate_key("Ed25519")
 
 
 @pytest.fixture
-def hooked(settings):
+def hooked(settings: SettingsWrapper) -> SettingsWrapper:
     settings.REKUEST_HOOK = {"REKUEST_URL": "http://127.0.0.1:9"}
     settings.INSTANCE = {
         "PRIVATE_KEY": BANK_KEY.as_pem(private=True).decode(),
@@ -49,7 +51,7 @@ def _signed(
     *,
     method: str = "POST",
     path: str = "/_rekuest/hook",
-    key=REKUEST_KEY,
+    key: OKPKey = REKUEST_KEY,
 ) -> dict:
     """Headers of a request rekuest sends: a service JWT from rekuest's key, for bank."""
     authorization = trust.sign(
@@ -58,7 +60,7 @@ def _signed(
     return {"Authorization": authorization, "X-Rekuest-Agent": agent}
 
 
-def test_the_action_is_offered_and_wired_to_nothing():
+def test_the_action_is_offered_and_wired_to_nothing() -> None:
     assert agent.actions["sync_all_accounts"].manifest() == {
         "interface": "sync_all_accounts",
         "name": "Sync all bank accounts",
@@ -67,7 +69,7 @@ def test_the_action_is_offered_and_wired_to_nothing():
     }
 
 
-def test_the_service_and_the_agent_are_separate_declarations():
+def test_the_service_and_the_agent_are_separate_declarations() -> None:
     assert "actions" not in service.manifest() and not hasattr(service, "action")
     assert [a["interface"] for a in agent.manifest()["actions"]] == [
         "sync_all_accounts",
@@ -75,7 +77,9 @@ def test_the_service_and_the_agent_are_separate_declarations():
     ]
 
 
-async def test_a_scheduled_pass_syncs_every_active_account(link, fakebank):
+async def test_a_scheduled_pass_syncs_every_active_account(
+    link: Link, fakebank: FakeBank
+) -> None:
     fakebank.scenario(
         [
             account(iban="AT1", transactions=[tx("-1.00", "2026-09-01", "Shop")]),
@@ -95,8 +99,8 @@ async def test_a_scheduled_pass_syncs_every_active_account(link, fakebank):
 
 
 async def test_a_pass_syncs_only_the_organization_it_runs_for(
-    link, fakebank, other_org_context
-):
+    link: Link, fakebank: FakeBank, other_org_context: HttpContext
+) -> None:
     """Every organization has the agent and its own schedule: a run must not do another's work."""
     fakebank.scenario(
         [account(iban="AT1", transactions=[tx("-1.00", "2026-09-01", "Shop")])]
@@ -137,7 +141,7 @@ async def test_a_pass_syncs_only_the_organization_it_runs_for(
     }
 
 
-async def test_the_reserve_is_left_for_users(link, fakebank):
+async def test_the_reserve_is_left_for_users(link: Link, fakebank: FakeBank) -> None:
     fakebank.scenario([account(iban="AT1")])
     acc_id = int((await link())["accounts"][0]["id"])
     # 4 a day (the test limit); 3 spent → 1 left, which is the reserve.
@@ -155,7 +159,9 @@ async def test_the_reserve_is_left_for_users(link, fakebank):
     ).syncs_today == 3  # nothing spent
 
 
-async def test_a_signed_assign_runs_the_sync(hooked, link, fakebank):
+async def test_a_signed_assign_runs_the_sync(
+    hooked: SettingsWrapper, link: Link, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account(iban="AT1")])
     acc_id = int((await link())["accounts"][0]["id"])
     body = json.dumps(
@@ -188,7 +194,7 @@ async def test_a_signed_assign_runs_the_sync(hooked, link, fakebank):
     ).last_synced_at is not None
 
 
-def test_the_manifest_is_signed_and_lists_the_action(hooked):
+def test_the_manifest_is_signed_and_lists_the_action(hooked: SettingsWrapper) -> None:
     client = HttpClient()
     assert client.get("/_rekuest/hook/manifest").status_code == 401
     response = client.get(
@@ -199,7 +205,9 @@ def test_the_manifest_is_signed_and_lists_the_action(hooked):
     assert "sync_all_accounts" in [a["interface"] for a in response.json()["actions"]]
 
 
-def test_unsigned_forged_and_unconfigured_requests_are_refused(hooked, settings):
+def test_unsigned_forged_and_unconfigured_requests_are_refused(
+    hooked: SettingsWrapper, settings: SettingsWrapper
+) -> None:
     client = HttpClient()
     body = (
         b'{"type": "ASSIGN", "task": "1", "interface": "sync_all_accounts", "args": {}}'

@@ -10,9 +10,10 @@ checking a real export before a client uploads it::
 
 import json
 from pathlib import Path
+from typing import Any
 
 from authentikate.models import Organization
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db.models import Q
 
 from finance import models
@@ -22,7 +23,7 @@ from finance.imports import apply as importing
 class Command(BaseCommand):
     help = "Preview (and with --apply, write) a Finanzguru transaction export into an organization's accounts."
 
-    def add_arguments(self, parser) -> None:  # noqa: ANN001
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "path", help="The export (.xlsx, or CSV with the same columns)."
         )
@@ -44,7 +45,7 @@ class Command(BaseCommand):
             help="Where one account of the file goes (repeatable).",
         )
 
-    def handle(self, *args, **options) -> None:  # noqa: ANN002, ANN003
+    def handle(self, *args: object, **options: Any) -> None:
         path = Path(options["path"])
         if not path.is_file():
             raise CommandError(f"No such file: {path}")

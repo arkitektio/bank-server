@@ -4,16 +4,21 @@ The save goes to a real local HTTP server standing in for rekuest's signal intak
 checked the way rekuest checks it (the instance-key JWT, the body).
 """
 
+import asyncio
 import json
 import threading
 import time
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from arkitekt_service import trust
+from authentikate.models import Organization
 from joserfc.jwk import OKPKey
+from pytest_django.fixtures import SettingsWrapper
 
 from bank_server.service import service
+from tests.conftest import FakeBank, Link
 
 EXPECTED = {
     "@bank/bankconnection": ["CREATED", "UPDATED"],
@@ -36,7 +41,7 @@ class _Intake:
         intake = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_POST(self):  # noqa: N802
+            def do_POST(self) -> None:  # noqa: N802
                 body = self.rfile.read(int(self.headers["Content-Length"]))
                 intake.received.append(
                     {
@@ -49,7 +54,7 @@ class _Intake:
                 self.send_response(202)
                 self.end_headers()
 
-            def log_message(self, *args):
+            def log_message(self, format: str, *args: object) -> None:
                 pass
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -67,7 +72,7 @@ class _Intake:
 
 
 @pytest.fixture
-def intake(settings):
+def intake(settings: SettingsWrapper) -> Iterator[_Intake]:
     server = _Intake()
     settings.REKUEST_SERVICE = {"REKUEST_URL": server.url, "SERVICE": "bank"}
     settings.INSTANCE = {
@@ -81,21 +86,19 @@ def intake(settings):
     server.server.server_close()
 
 
-def _organization():
-    from authentikate.models import Organization
-
+def _organization() -> Organization:
     return Organization.objects.get_or_create(
         identifier="static_issuer#signals-test-org"
     )[0]
 
 
-def test_the_manifest_declares_every_model_signal():
+def test_the_manifest_declares_every_model_signal() -> None:
     assert {
         s["identifier"]: s["kinds"] for s in service.manifest()["signals"]
     } == EXPECTED
 
 
-def test_the_manifest_lists_what_bank_hosts_with_its_descriptors():
+def test_the_manifest_lists_what_bank_hosts_with_its_descriptors() -> None:
     hosted = {s["identifier"]: s for s in service.manifest()["structures"]}
     assert set(hosted) == set(EXPECTED)
     assert hosted["@bank/bankaccount"]["label"] == "Bank Account"
@@ -139,7 +142,7 @@ def test_the_manifest_lists_what_bank_hosts_with_its_descriptors():
         )
 
 
-def test_what_a_sync_brought_is_said_by_the_signal_not_by_the_account():
+def test_what_a_sync_brought_is_said_by_the_signal_not_by_the_account() -> None:
     manifest = service.manifest()
     account = next(
         s for s in manifest["structures"] if s["identifier"] == "@bank/bankaccount"
@@ -162,7 +165,7 @@ def test_what_a_sync_brought_is_said_by_the_signal_not_by_the_account():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_save_is_signalled_signed_by_this_instance(intake):
+def test_a_save_is_signalled_signed_by_this_instance(intake: _Intake) -> None:
     from finance.models import Category
 
     org = _organization()
@@ -187,7 +190,9 @@ def test_a_save_is_signalled_signed_by_this_instance(intake):
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
-async def test_a_sync_is_one_account_signal_with_its_counts(intake, link, fakebank):
+async def test_a_sync_is_one_account_signal_with_its_counts(
+    intake: _Intake, link: Link, fakebank: FakeBank
+) -> None:
     """Transactions are bulk-created, so no model signal fires per row: the sync says how many."""
     from finance.scheduled import sync_all_accounts
     from tests.conftest import account, tx
@@ -206,16 +211,17 @@ async def test_a_sync_is_one_account_signal_with_its_counts(intake, link, fakeba
     await link()
     await sync_all_accounts(organization="static_issuer#static_org")
 
-    def synced():
+    def synced() -> list[dict]:
         return [
             r
             for r in intake.of("@bank/bankaccount", count=1)
             if "@bank/new_transactions" in r["json"]["descriptors"]
         ]
 
-    deadline = time.monotonic() + 10
-    while not synced() and time.monotonic() < deadline:
-        time.sleep(0.05)
+    for _ in range(200):  # up to 10 s
+        if synced():
+            break
+        await asyncio.sleep(0.05)
     (received,) = synced()
     assert received["json"]["kind"] == "UPDATED"
     # The account's own descriptors, and what only the sync knows.

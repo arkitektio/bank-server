@@ -15,6 +15,7 @@ import pytest
 from asgiref.sync import sync_to_async
 from authentikate.models import Organization
 from django.core.management import call_command
+from kante.context import HttpContext
 
 from bank_server import descriptors
 from bank_server.hook_agent import agent
@@ -23,13 +24,27 @@ from embeddings.healer import stale_queryset
 from finance import models
 from finance.scheduled import sync_all_accounts
 from finance.taxonomy import seed_base_categories
-from tests.conftest import LINK, SESSION, account, cash, trade, tx
+from tests.conftest import (
+    LINK,
+    SESSION,
+    AExecute,
+    FakeBank,
+    FakeScalable,
+    Link,
+    ProviderFor,
+    account,
+    cash,
+    error_of,
+    trade,
+    tx,
+)
 from tests.test_import_finanzguru import (
     APPLY,
+    ImportFile,
     fg,
     import_file,  # noqa: F401  the fixture
 )
-from tests.test_signals import intake  # noqa: F401  the fixture
+from tests.test_signals import _Intake, intake  # noqa: F401  the fixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -67,7 +82,9 @@ def _stored(model: type, **filters: object) -> list:
     return rows
 
 
-async def _required(aexecute, field: str, constraints: list[dict]) -> set[str]:
+async def _required(
+    aexecute: AExecute, field: str, constraints: list[dict]
+) -> set[str]:
     result = await aexecute(
         f"query ($c: [DescriptorConstraintInput!]!) {{ {field}(filters: {{ requires: $c }}) {{ id }} }}",
         {"c": constraints},
@@ -80,8 +97,11 @@ def _eq(key: str, value: object) -> list[dict]:
 
 
 async def test_an_object_answers_the_descriptors_its_structure_declares(
-    link, aexecute, fakebank, authenticated_context
-):
+    link: Link,
+    aexecute: AExecute,
+    fakebank: FakeBank,
+    authenticated_context: HttpContext,
+) -> None:
     fakebank.scenario(
         [account(iban="AT1", transactions=[tx("-1.00", "2026-09-01", "Shop")])]
     )
@@ -158,10 +178,10 @@ async def test_an_object_answers_the_descriptors_its_structure_declares(
 
 
 async def test_the_field_answers_what_the_signal_carried(
-    intake,  # noqa: F811
-    aexecute,
-    authenticated_context,
-):
+    intake: _Intake,  # noqa: F811
+    aexecute: AExecute,
+    authenticated_context: HttpContext,
+) -> None:
     category = await models.Category.objects.acreate(
         name="signalled and described",
         organization=authenticated_context.request.organization,
@@ -183,8 +203,11 @@ CATEGORIZE = "mutation($ids: [ID!]!, $c: ID) { categorizeTransactions(ids: $ids,
 
 
 async def test_a_sync_stores_what_its_bulk_writes_describe_and_requires_filters_on_it(
-    link, aexecute, fakebank, authenticated_context
-):
+    link: Link,
+    aexecute: AExecute,
+    fakebank: FakeBank,
+    authenticated_context: HttpContext,
+) -> None:
     """Rows are bulk-created, merchants matched, rules applied and transfers detected in bulk: each step keeps the column right."""
     organization = authenticated_context.request.organization
     groceries = await models.Category.objects.acreate(
@@ -341,15 +364,19 @@ async def test_a_sync_stores_what_its_bulk_writes_describe_and_requires_filters_
         {"c": _eq("@bank/colour", "red")},
         allow_errors=True,
     )
-    assert result.errors and "not a descriptor here" in result.errors[0].message
+    assert result.errors and "not a descriptor here" in error_of(result).message
 
 
 SYNC_CONNECTION = "mutation Sync($id: ID!) { syncConnection(id: $id) { created } }"
 
 
 async def test_a_scalable_sync_describes_its_trades_and_providers_are_filtered_by_capability(
-    scalable_link, provider_for, aexecute, fakescalable, authenticated_context
-):
+    scalable_link: Link,
+    provider_for: ProviderFor,
+    aexecute: AExecute,
+    fakescalable: FakeScalable,
+    authenticated_context: HttpContext,
+) -> None:
     fakescalable.seed(
         {
             "p1": {
@@ -426,10 +453,10 @@ async def test_a_scalable_sync_describes_its_trades_and_providers_are_filtered_b
 
 
 async def test_an_import_stores_what_it_wrote_in_bulk(
-    import_file,  # noqa: F811
-    aexecute,
-    authenticated_context,
-):
+    import_file: ImportFile,  # noqa: F811
+    aexecute: AExecute,
+    authenticated_context: HttpContext,
+) -> None:
     reference = f"DE{uuid.uuid4().int % 10**20:020d}"
     preview = await import_file(
         [
@@ -472,8 +499,8 @@ async def test_an_import_stores_what_it_wrote_in_bulk(
 
 
 async def test_categories_merchants_and_budgets_are_described_and_filtered(
-    aexecute, authenticated_context
-):
+    aexecute: AExecute, authenticated_context: HttpContext
+) -> None:
     organization = authenticated_context.request.organization
     await sync_to_async(seed_base_categories)(organization.id, {"food"})
     own = await models.Category.objects.acreate(
@@ -521,12 +548,15 @@ async def test_categories_merchants_and_budgets_are_described_and_filtered(
     ] == "INCOME"
 
 
-CANCEL = "mutation($s: String!) { cancelAuth(state: $s) { %s } }" % SESSION
+CANCEL = "mutation($s: String!) { cancelAuth(state: $s) { " + SESSION + " } }"
 
 
 async def test_a_cancelled_login_is_stored_as_cancelled(
-    aexecute, fakebank, provider_for, authenticated_context
-):
+    aexecute: AExecute,
+    fakebank: FakeBank,
+    provider_for: ProviderFor,
+    authenticated_context: HttpContext,
+) -> None:
     fakebank.scenario([account(iban=_iban())])
     started = (
         await aexecute(
@@ -548,8 +578,8 @@ async def test_a_cancelled_login_is_stored_as_cancelled(
 
 
 async def test_the_setup_job_repairs_a_row_that_misses_its_descriptors(
-    link, fakebank, authenticated_context
-):
+    link: Link, fakebank: FakeBank, authenticated_context: HttpContext
+) -> None:
     fakebank.scenario(
         [account(iban=_iban(), transactions=[tx("-1.00", "2026-09-01", "Shop")])]
     )
@@ -600,8 +630,8 @@ async def _stale_rows(organization: Organization) -> dict[type, int]:
 
 
 async def test_a_sweep_for_one_organization_claims_only_its_rows(
-    authenticated_context, other_org_context
-):
+    authenticated_context: HttpContext, other_org_context: HttpContext
+) -> None:
     """Every organization has the agent and its own schedule: a run must not do another's work."""
     mine = await _stale_rows(authenticated_context.request.organization)
     theirs = await _stale_rows(other_org_context.request.organization)

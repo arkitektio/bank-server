@@ -1,5 +1,6 @@
 """Schema-surface checks: no money as Int/Float, enums in step with the models, no org switch."""
 
+import enum
 import re
 
 import pytest
@@ -11,7 +12,7 @@ from finance.types import imports as import_types
 SDL = str(schema)
 
 
-def test_money_is_never_int_or_float():
+def test_money_is_never_int_or_float() -> None:
     money = re.compile(
         r"^\s+(amount\w*|total|income|expense|net|budgeted|spent|remaining)\s*:\s*(Int|Float)",
         re.MULTILINE | re.IGNORECASE,
@@ -19,7 +20,7 @@ def test_money_is_never_int_or_float():
     assert not money.findall(SDL)
 
 
-def test_active_organization_is_not_exposed():
+def test_active_organization_is_not_exposed() -> None:
     assert "activeOrganization" not in SDL
 
 
@@ -47,5 +48,7 @@ def test_active_organization_is_not_exposed():
         (enums.RecurringStatus, models.RecurringStatus),
     ],
 )
-def test_enums_match_model_choices(gql, choices):
+def test_enums_match_model_choices(
+    gql: type[enum.Enum], choices: type[enum.Enum]
+) -> None:
     assert {m.name: m.value for m in gql} == {m.name: m.value for m in choices}

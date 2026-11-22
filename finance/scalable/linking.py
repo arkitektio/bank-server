@@ -22,6 +22,7 @@ same accounts with their history.
 import secrets
 from datetime import timedelta
 
+from authentikate.models import Organization, User
 from channels.db import database_sync_to_async
 from django.db import transaction as db_transaction
 from django.utils import timezone
@@ -38,8 +39,8 @@ INSTITUTION = "Scalable Capital"
 
 
 async def start_scalable_link(
-    provider: models.BankProvider, organization, creator
-) -> models.BankConnection:  # noqa: ANN001 - authentikate models
+    provider: models.BankProvider, organization: Organization, creator: User
+) -> models.BankConnection:
     """Start a device login; returns the PENDING connection (its ``raw`` holds what the user opens)."""
     key = DpopKey.generate()
     async with ScalableClient() as client:
@@ -168,7 +169,7 @@ def _activate(
     return connection
 
 
-def _update(connection_id: int, **fields) -> None:  # noqa: ANN003
+def _update(connection_id: int, **fields: object) -> None:
     from bank_server.service import restore_connection  # it imports finance.models
 
     models.BankConnection.objects.filter(id=connection_id).update(**fields)

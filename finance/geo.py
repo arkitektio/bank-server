@@ -11,7 +11,16 @@ parses geometry.
 from typing import Any
 
 from django.db import models
-from django.db.models import BooleanField, F, FloatField, Func, Value
+from django.db.backends.base.base import BaseDatabaseWrapper
+from django.db.models import (
+    BooleanField,
+    F,
+    FloatField,
+    Func,
+    Subquery,
+    Value,
+)
+from django.db.models.expressions import Combinable
 
 
 class GeographyPointField(models.Field):
@@ -19,10 +28,10 @@ class GeographyPointField(models.Field):
 
     description = "A WGS84 point (PostGIS geography)"
 
-    def db_type(self, connection: Any) -> str:
+    def db_type(self, connection: BaseDatabaseWrapper) -> str:
         return "geography(Point,4326)"
 
-    def rel_db_type(self, connection: Any) -> str:
+    def rel_db_type(self, connection: BaseDatabaseWrapper) -> str:
         return self.db_type(connection)
 
 
@@ -81,9 +90,9 @@ def near(
 
 def nearest_location_meters(
     latitude: float, longitude: float, outer: str = "pk"
-) -> Any:
+) -> Subquery:
     """A subquery: the distance from (lat, lon) to the merchant's (``OuterRef(outer)``) closest located store."""
-    from django.db.models import OuterRef, Subquery
+    from django.db.models import OuterRef
 
     from finance import models
 
@@ -150,7 +159,9 @@ class SnapToGrid(Func):
     arity = 3
     output_field = GeographyPointField()
 
-    def __init__(self, geometry: Any, dx: float, dy: float, **extra: Any) -> None:
+    def __init__(
+        self, geometry: Combinable, dx: float, dy: float, **extra: Any
+    ) -> None:
         super().__init__(
             geometry,
             Value(float(dx), output_field=FloatField()),

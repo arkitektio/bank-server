@@ -127,7 +127,7 @@ def _verify_proof(request: web.Request, access_token: str | None = None) -> str:
     return jkt
 
 
-def _log(request: web.Request, **extra) -> None:
+def _log(request: web.Request, **extra: object) -> None:
     STATE["log"].append({"path": request.path, **extra})
 
 

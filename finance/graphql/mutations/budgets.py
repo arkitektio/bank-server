@@ -4,6 +4,7 @@ import datetime
 from decimal import Decimal
 
 import strawberry
+from django.utils import timezone
 from kante.errors import ValidationError
 from kante.types import Info
 
@@ -70,7 +71,7 @@ def create_budget(info: Info, input: CreateBudgetInput) -> types.Budget:
             category=get_or_404(models.Category, info, input.category),
             amount=input.amount,
             currency=input.currency,
-            start_month=input.start_month or datetime.date.today(),
+            start_month=input.start_month or timezone.localdate(),
             end_month=input.end_month,
         )
     )

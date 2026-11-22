@@ -7,7 +7,7 @@ approval at the bank is fakebank's /_admin/approve, and every sync goes over rea
 import pytest
 
 from finance import models
-from tests.conftest import account, tx
+from tests.conftest import AExecute, FakeBank, Link, account, extensions_of, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -19,7 +19,9 @@ query Txs($acc: ID!) { transactions(filters: {accounts: [$acc]}, ordering: [{boo
 """
 
 
-async def test_link_creates_accounts_and_default_categories(link, fakebank):
+async def test_link_creates_accounts_and_default_categories(
+    link: Link, fakebank: FakeBank
+) -> None:
     fakebank.scenario(
         [account(iban="AT111", balance="100.00"), account(iban="AT222", currency="USD")]
     )
@@ -32,26 +34,32 @@ async def test_link_creates_accounts_and_default_categories(link, fakebank):
     assert await models.Category.objects.filter(name="Groceries").aexists()
 
 
-async def test_complete_rejects_unknown_state(aexecute, fakebank):
+async def test_complete_rejects_unknown_state(
+    aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account()])
     result = await aexecute(
         'mutation { completeAuth(input: {code: "x", state: "not-a-state"}) { status } }',
         allow_errors=True,
     )
-    assert result.errors[0].extensions["code"] == "INVALID_STATE"
+    assert extensions_of(result)["code"] == "INVALID_STATE"
 
 
-async def test_unregistered_redirect_is_refused(aexecute, fakebank, eb_provider):
+async def test_unregistered_redirect_is_refused(
+    aexecute: AExecute, fakebank: FakeBank, eb_provider: str
+) -> None:
     fakebank.scenario([account()])
     result = await aexecute(
         'mutation($a: String!, $p: ID!) { startLink(input: {provider: $p, institution: $a, country: "AT", redirectUrl: "https://evil.test/cb"}) { state } }',
         {"a": fakebank.aspsp, "p": eb_provider},
         allow_errors=True,
     )
-    assert result.errors[0].extensions["code"] == "VALIDATION_ERROR"
+    assert extensions_of(result)["code"] == "VALIDATION_ERROR"
 
 
-async def test_sync_pages_and_is_idempotent(link, aexecute, fakebank):
+async def test_sync_pages_and_is_idempotent(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     # 7 rows > fakebank's page size of 3, so the continuation key is followed twice.
     rows = [tx(f"-{i}.00", f"2026-09-0{i}", f"Shop {i}") for i in range(1, 8)]
     fakebank.scenario([account(transactions=rows, balance="500.00")])
@@ -67,7 +75,9 @@ async def test_sync_pages_and_is_idempotent(link, aexecute, fakebank):
     assert await models.Transaction.objects.filter(account_id=acc_id).acount() == 7
 
 
-async def test_genuine_duplicates_are_kept(link, aexecute, fakebank):
+async def test_genuine_duplicates_are_kept(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     coffee = tx("-3.20", "2026-09-10", "Cafe")
     fakebank.scenario([account(transactions=[coffee, dict(coffee)])])
     acc_id = (await link())["accounts"][0]["id"]
@@ -79,8 +89,8 @@ async def test_genuine_duplicates_are_kept(link, aexecute, fakebank):
 
 
 async def test_annotations_survive_resync_and_pending_is_replaced(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     ident = "acc-annot"
     booked = tx("-50.00", "2026-09-01", "Grocer", ref="REF1")
     pending = tx("-9.99", "2026-09-05", "Streaming", status="PDNG")
@@ -117,7 +127,9 @@ async def test_annotations_survive_resync_and_pending_is_replaced(
     assert annotated["categorySource"] == "MANUAL"
 
 
-async def test_attended_sync_sends_psu_headers(link, aexecute, fakebank):
+async def test_attended_sync_sends_psu_headers(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account(transactions=[tx("-1.00", "2026-09-01", "X")])])
     acc_id = (await link())["accounts"][0]["id"]
     uid = (await models.AccountSyncer.objects.aget(account_id=acc_id)).remote_id
@@ -132,8 +144,8 @@ async def test_attended_sync_sends_psu_headers(link, aexecute, fakebank):
 
 
 async def test_expired_consent_needs_reauth_and_relink_keeps_history(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     ident = "acc-relink"
     fakebank.scenario(
         [account(ident, transactions=[tx("-5.00", "2026-09-01", "A", ref="R1")])]
@@ -145,7 +157,7 @@ async def test_expired_consent_needs_reauth_and_relink_keeps_history(
     fakebank.expire(connection.session_id)
 
     failed = await aexecute(SYNC, {"id": acc_id}, allow_errors=True)
-    assert failed.errors[0].extensions["code"] == "CONSENT_EXPIRED"
+    assert extensions_of(failed)["code"] == "CONSENT_EXPIRED"
     status = await aexecute(
         "query($id: ID!) { bankConnection(id: $id) { status needsReauth } }",
         {"id": first["id"]},
@@ -157,7 +169,9 @@ async def test_expired_consent_needs_reauth_and_relink_keeps_history(
     assert await models.Transaction.objects.filter(account_id=acc_id).acount() == 1
 
 
-async def test_transfers_between_own_accounts_are_flagged(link, aexecute, fakebank):
+async def test_transfers_between_own_accounts_are_flagged(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario(
         [
             account(
@@ -176,7 +190,9 @@ async def test_transfers_between_own_accounts_are_flagged(link, aexecute, fakeba
     assert await models.Transaction.objects.filter(is_transfer=True).acount() == 2
 
 
-async def test_bank_institutions_lists_linkable_banks(aexecute, fakebank, eb_provider):
+async def test_bank_institutions_lists_linkable_banks(
+    aexecute: AExecute, fakebank: FakeBank, eb_provider: str
+) -> None:
     fakebank.scenario([account()])
     result = await aexecute(
         'query($p: ID!) { bankInstitutions(provider: $p, country: "at") { name country maximumConsentDays } }',
@@ -189,7 +205,9 @@ async def test_bank_institutions_lists_linkable_banks(aexecute, fakebank, eb_pro
     } in result.data["bankInstitutions"]
 
 
-async def test_syncing_a_revoked_connection_keeps_it_revoked(link, aexecute, fakebank):
+async def test_syncing_a_revoked_connection_keeps_it_revoked(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account()])
     connection = await link()
     await aexecute(
@@ -203,7 +221,7 @@ async def test_syncing_a_revoked_connection_keeps_it_revoked(link, aexecute, fak
         allow_errors=True,
     )
 
-    assert result.errors[0].extensions["code"] == "CONNECTION_INACTIVE"
+    assert extensions_of(result)["code"] == "CONNECTION_INACTIVE"
     status = await aexecute(
         "query($id: ID!) { bankConnection(id: $id) { status needsReauth } }",
         {"id": connection["id"]},
@@ -212,8 +230,8 @@ async def test_syncing_a_revoked_connection_keeps_it_revoked(link, aexecute, fak
 
 
 async def test_old_pending_rows_outside_the_fetch_window_are_kept(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     """A pending row older than the incremental window is not re-sent, so it must not be dropped."""
     ident = "acc-old-pending"
     old_pending = tx("-7.00", "2026-08-01", "Hotel deposit", status="PDNG")
@@ -234,7 +252,9 @@ async def test_old_pending_rows_outside_the_fetch_window_are_kept(
     ).aexists()
 
 
-async def test_sync_runs_recurring_detection(link, aexecute, fakebank):
+async def test_sync_runs_recurring_detection(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     rows = [tx("-900.00", f"2026-{m:02d}-01", "Landlord") for m in (5, 6, 7, 8, 9)]
     fakebank.scenario([account(transactions=rows)])
     acc_id = (await link())["accounts"][0]["id"]

@@ -8,20 +8,21 @@ would share a connection and prove nothing. The interleaving is forced with fake
 import asyncio
 import threading
 import time
+from collections.abc import Callable
 
 import pytest
 from channels.db import database_sync_to_async
 
 from finance import models
 from finance.sync import AlreadySyncing, claim, release, sync_account
-from tests.conftest import account, tx
+from tests.conftest import FakeBank, Link, account, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def _in_thread(fn):  # noqa: ANN001, ANN202
+def _in_thread(fn: Callable[[], object]) -> tuple[threading.Thread, dict[str, object]]:
     """Run ``fn`` in a fresh thread; returns (thread, outcome dict)."""
-    outcome: dict = {}
+    outcome: dict[str, object] = {}
 
     def run() -> None:
         from django.db import connection
@@ -38,19 +39,19 @@ def _in_thread(fn):  # noqa: ANN001, ANN202
     return thread, outcome
 
 
-async def _linked_account(link, fakebank, rows) -> int:  # noqa: ANN001
+async def _linked_account(link: Link, fakebank: FakeBank, rows: list[dict]) -> int:
     fakebank.scenario([account(transactions=rows)])
     return int((await link())["accounts"][0]["id"])
 
 
-def _wait_until(predicate, timeout: float = 10) -> None:  # noqa: ANN001
+def _wait_until(predicate: Callable[[], object], timeout: float = 10) -> None:
     deadline = time.monotonic() + timeout
     while not predicate():
         assert time.monotonic() < deadline, "timed out"
         time.sleep(0.02)
 
 
-async def test_claim_has_exactly_one_winner(link, fakebank):
+async def test_claim_has_exactly_one_winner(link: Link, fakebank: FakeBank) -> None:
     account_id = await _linked_account(link, fakebank, [])
     syncer_id = (await models.AccountSyncer.objects.aget(account_id=account_id)).id
     barrier = threading.Barrier(8)
@@ -66,7 +67,9 @@ async def test_claim_has_exactly_one_winner(link, fakebank):
     await database_sync_to_async(release)(syncer_id)
 
 
-async def test_second_sync_is_refused_while_first_holds_the_account(link, fakebank):
+async def test_second_sync_is_refused_while_first_holds_the_account(
+    link: Link, fakebank: FakeBank
+) -> None:
     account_id = await _linked_account(
         link, fakebank, [tx(f"-{i}.00", "2026-09-01", f"S{i}") for i in range(1, 5)]
     )
@@ -90,7 +93,7 @@ async def test_second_sync_is_refused_while_first_holds_the_account(link, fakeba
     ).sync_lease_until is None
 
 
-async def test_expired_lease_is_taken_over(link, fakebank):
+async def test_expired_lease_is_taken_over(link: Link, fakebank: FakeBank) -> None:
     """A sync that crashed without releasing blocks the account only until its lease runs out."""
     from datetime import timedelta
 

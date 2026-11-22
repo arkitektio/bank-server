@@ -6,9 +6,20 @@ from datetime import date, timedelta
 
 import pytest
 from django.utils import timezone
+from kante.context import HttpContext
 
 from finance import models
-from tests.conftest import account, cash, trade, tx
+from tests.conftest import (
+    AExecute,
+    FakeBank,
+    FakeScalable,
+    Link,
+    account,
+    cash,
+    extensions_of,
+    trade,
+    tx,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -31,8 +42,8 @@ def _tomorrow_utc() -> str:
 
 
 async def test_the_daily_budget_is_shown_and_enforced_without_asking_the_bank(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account()])
     connection = await link()
     acc = connection["accounts"][0]["id"]
@@ -54,14 +65,14 @@ async def test_the_daily_budget_is_shown_and_enforced_without_asking_the_bank(
         "syncsRemainingToday": 0,
         "nextSyncAllowedAt": after["bankAccount"]["nextSyncAllowedAt"],
     }
-    assert refused.errors[0].extensions["code"] == "RATE_LIMITED"
-    assert refused.errors[0].extensions["nextSyncAllowedAt"].startswith(_tomorrow_utc())
+    assert extensions_of(refused)["code"] == "RATE_LIMITED"
+    assert extensions_of(refused)["nextSyncAllowedAt"].startswith(_tomorrow_utc())
     assert len(fakebank.log()) == calls  # refused before contacting the bank
 
 
 async def test_a_bank_rate_limit_is_recorded_and_blocks_until_tomorrow(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     ident = "rate-" + fakebank.aspsp.replace(" ", "-")
     fakebank.scenario([account(ident)])
     connection = await link()
@@ -73,15 +84,15 @@ async def test_a_bank_rate_limit_is_recorded_and_blocks_until_tomorrow(
         "bankAccount"
     ]
 
-    assert failed.errors[0].extensions["code"] == "RATE_LIMITED"
+    assert extensions_of(failed)["code"] == "RATE_LIMITED"
     assert state["lastErrorCode"] == "RATE_LIMITED"
     assert state["nextSyncAllowedAt"].startswith(_tomorrow_utc())
     assert state["syncsRemainingToday"] == 3
 
 
 async def test_scalable_retry_after_sets_the_next_allowed_sync(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed({"p1": {"cash": 1}})
     connection = await scalable_link()
     cash_account = next(a for a in connection["accounts"] if a["kind"] == "CASH")["id"]
@@ -92,15 +103,15 @@ async def test_scalable_retry_after_sets_the_next_allowed_sync(
         "bankAccount"
     ]
 
-    assert failed.errors[0].extensions["code"] == "RATE_LIMITED"
+    assert extensions_of(failed)["code"] == "RATE_LIMITED"
     allowed = timezone.datetime.fromisoformat(state["nextSyncAllowedAt"])
     assert timedelta(seconds=100) < allowed - timezone.now() <= timedelta(seconds=120)
     assert state["syncsRemainingToday"] is None  # Scalable has no daily limit
 
 
 async def test_expired_consent_is_coded_on_account_and_connection(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account()])
     connection = await link()
     acc = connection["accounts"][0]["id"]
@@ -115,7 +126,7 @@ async def test_expired_consent_is_coded_on_account_and_connection(
         )
     ).data["bankConnection"]
 
-    assert failed.errors[0].extensions["code"] == "CONSENT_EXPIRED"
+    assert extensions_of(failed)["code"] == "CONSENT_EXPIRED"
     assert state == {
         "status": "EXPIRED",
         "lastErrorCode": "CONSENT_EXPIRED",
@@ -126,7 +137,9 @@ async def test_expired_consent_is_coded_on_account_and_connection(
 # --- §5 bulk mutations -----------------------------------------------------------------------
 
 
-async def _synced_bank(link, aexecute, fakebank, rows) -> tuple[str, list[str]]:  # noqa: ANN001
+async def _synced_bank(
+    link: Link, aexecute: AExecute, fakebank: FakeBank, rows: list[dict]
+) -> tuple[str, list[str]]:
     fakebank.scenario([account(transactions=rows)])
     acc = (await link())["accounts"][0]["id"]
     await aexecute(SYNC, {"id": acc})
@@ -142,7 +155,9 @@ async def _synced_bank(link, aexecute, fakebank, rows) -> tuple[str, list[str]]:
     return acc, ids
 
 
-async def test_bulk_categorize_and_clear(link, aexecute, fakebank, other_org_context):
+async def test_bulk_categorize_and_clear(
+    link: Link, aexecute: AExecute, fakebank: FakeBank, other_org_context: HttpContext
+) -> None:
     acc, ids = await _synced_bank(
         link,
         aexecute,
@@ -182,10 +197,12 @@ async def test_bulk_categorize_and_clear(link, aexecute, fakebank, other_org_con
         for t in done
     )
     assert [t["categorySource"] for t in cleared] == ["NONE", "NONE"]
-    assert foreign.errors[0].extensions["code"] == "NOT_FOUND"
+    assert extensions_of(foreign)["code"] == "NOT_FOUND"
 
 
-async def test_bulk_mark_transfers_pins_and_unpins(link, aexecute, fakebank):
+async def test_bulk_mark_transfers_pins_and_unpins(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, ids = await _synced_bank(
         link,
         aexecute,
@@ -211,8 +228,8 @@ async def test_bulk_mark_transfers_pins_and_unpins(link, aexecute, fakebank):
 
 
 async def test_unpinning_a_scalable_trade_restores_the_provider_flag(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed(
         {
             "p1": {
@@ -247,7 +264,9 @@ async def test_unpinning_a_scalable_trade_restores_the_provider_flag(
     assert restored == [{"isTransfer": True, "isTransferManual": False}]
 
 
-async def test_bulk_recurring_statuses(link, aexecute, fakebank):
+async def test_bulk_recurring_statuses(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account()])
     acc_id = int((await link())["accounts"][0]["id"])
     acc = await models.BankAccount.objects.aget(id=acc_id)
@@ -279,7 +298,9 @@ async def test_bulk_recurring_statuses(link, aexecute, fakebank):
 # --- §6 filters and ordering, §7 counts ------------------------------------------------------
 
 
-async def test_accounts_by_kind_and_ordered(scalable_link, aexecute, fakescalable):
+async def test_accounts_by_kind_and_ordered(
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed({"p1": {"cash": 1}}, savings={"s1": {"total": 1}})
     await scalable_link()
 
@@ -295,7 +316,9 @@ async def test_accounts_by_kind_and_ordered(scalable_link, aexecute, fakescalabl
     assert names == sorted(names)
 
 
-async def test_categories_and_recurring_ordering(link, aexecute, fakebank):
+async def test_categories_and_recurring_ordering(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account()])
     await link()
 
@@ -324,7 +347,9 @@ async def test_categories_and_recurring_ordering(link, aexecute, fakebank):
     ] == []
 
 
-async def test_child_categories_kinds_and_counts(link, aexecute, fakebank):
+async def test_child_categories_kinds_and_counts(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, ids = await _synced_bank(
         link,
         aexecute,
@@ -377,8 +402,8 @@ async def test_child_categories_kinds_and_counts(link, aexecute, fakebank):
 
 
 async def test_transaction_kind_is_typed_and_filterable(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     rows = [
         trade(-100, "2026-09-10T10:00:00.000Z", "IE00TEST0001"),
         cash(5, "2026-09-11T00:00:00.000Z", "DISTRIBUTION"),
@@ -407,7 +432,9 @@ async def test_transaction_kind_is_typed_and_filterable(
     )
 
 
-async def test_budget_fields_resolve_in_nested_lists(link, aexecute, fakebank):
+async def test_budget_fields_resolve_in_nested_lists(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account(), account()])
     connection = await link()
     await aexecute(SYNC, {"id": connection["accounts"][0]["id"]})

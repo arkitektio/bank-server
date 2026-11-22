@@ -2,10 +2,13 @@
 
 import datetime
 from enum import Enum
+from typing import Any
 
 import kante
 import strawberry
 import strawberry_django
+from django.db.models import QuerySet
+from kante.types import Info
 from strawberry.scalars import JSON
 
 from finance import filters, models
@@ -134,7 +137,7 @@ class StatementImport(OrgScoped):
     )
 
     @classmethod
-    def get_queryset(cls, queryset, info, **kwargs):  # noqa: ANN001, ANN206
+    def get_queryset(cls, queryset: QuerySet, info: Info, **kwargs: Any) -> QuerySet:
         return (
             super()
             .get_queryset(queryset, info, **kwargs)

@@ -11,6 +11,7 @@ never-seen "HOFER DANKT" lands near Groceries before anyone categorized a single
 A child's kind is always its root's (see :func:`finance.models.Category.root_kind`).
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from django.db import IntegrityError, transaction
@@ -411,7 +412,9 @@ LEGACY_KEYS: dict[str, str] = {
 }
 
 
-def walk(nodes: tuple[Node, ...] = BASE, parent: Node | None = None):  # noqa: ANN201
+def walk(
+    nodes: tuple[Node, ...] = BASE, parent: Node | None = None
+) -> Iterator[tuple[Node, Node | None]]:
     """Every node with its parent, parents first."""
     for node in nodes:
         yield node, parent

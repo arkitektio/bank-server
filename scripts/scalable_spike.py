@@ -82,12 +82,12 @@ Q_OVERNIGHT_TX = """query OvernightTransactions($accountId: ID!, $savingsAccount
 report: dict = {"user_agent": USER_AGENT, "steps": []}
 
 
-def note(step: str, **data) -> None:
+def note(step: str, **data: object) -> None:
     print(f"[{step}] {json.dumps(data, default=str)[:400]}")
     report["steps"].append({"step": step, "at": time.time(), **data})
 
 
-def write(path: Path, data) -> None:
+def write(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, indent=2, default=str))
     path.chmod(0o600)
 
@@ -96,7 +96,7 @@ def claims(token: str) -> dict:
     return jwt.decode(token, options={"verify_signature": False})
 
 
-def claim(c: dict, name: str):
+def claim(c: dict, name: str) -> str | None:
     return c.get(f"https://de.scalable.capital/{name}") or c.get(name)
 
 
@@ -105,10 +105,10 @@ async def post(
     key: DpopKey,
     url: str,
     *,
-    form=None,
-    body=None,
-    token=None,
-):
+    form: dict | None = None,
+    body: dict | None = None,
+    token: str | None = None,
+) -> tuple[int, dict[str, str], str]:
     """One DPoP request with the CLI's single nonce retry."""
     nonce = None
     for attempt in range(2):
@@ -133,7 +133,14 @@ async def post(
     raise AssertionError("unreachable")
 
 
-async def gql(http, key, token, op, query, variables):
+async def gql(
+    http: aiohttp.ClientSession,
+    key: DpopKey,
+    token: str,
+    op: str,
+    query: str,
+    variables: dict,
+) -> dict | None:
     status, headers, text = await post(
         http,
         key,
@@ -141,7 +148,7 @@ async def gql(http, key, token, op, query, variables):
         body={"operationName": op, "query": query, "variables": variables},
         token=token,
     )
-    data = json.loads(text) if text.startswith("{") else {"raw": text}
+    data: dict = json.loads(text) if text.startswith("{") else {"raw": text}
     write(
         OUT / f"gql-{op}.json",
         {"status": status, "variables": variables, "response": data},
@@ -154,7 +161,9 @@ async def gql(http, key, token, op, query, variables):
     return data.get("data") if isinstance(data, dict) else None
 
 
-async def token_request(http, key, form):
+async def token_request(
+    http: aiohttp.ClientSession, key: DpopKey, form: dict
+) -> tuple[int, dict]:
     status, headers, text = await post(
         http, key, f"{ISSUER}/oauth/token", form={**form, "client_id": CLIENT_ID}
     )
@@ -181,7 +190,7 @@ def remember(session: dict, tok: dict) -> None:
     write(SESSION, session)
 
 
-async def login(http) -> dict:
+async def login(http: aiohttp.ClientSession) -> dict:
     key = DpopKey.generate()
     session = {
         "dpop_pem": key.to_pem(),
@@ -268,7 +277,7 @@ async def login(http) -> dict:
     return session
 
 
-async def refresh(http, session) -> dict:
+async def refresh(http: aiohttp.ClientSession, session: dict) -> dict:
     key = DpopKey.from_pem(session["dpop_pem"])
     form = {"grant_type": "refresh_token", "refresh_token": session["refresh_token"]}
     if session.get("session_id"):
@@ -288,7 +297,7 @@ async def refresh(http, session) -> dict:
     return session
 
 
-async def queries(http, session) -> None:
+async def queries(http: aiohttp.ClientSession, session: dict) -> None:
     key = DpopKey.from_pem(session["dpop_pem"])
     tok, uid = session["access_token"], session["person_id"]
     ids = await gql(http, key, tok, "ResolveBrokerIds", Q_RESOLVE, {"id": uid})

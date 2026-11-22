@@ -73,10 +73,10 @@ def _save_category(category: models.Category) -> models.Category:
     try:
         with db_transaction.atomic():
             category.save()
-    except IntegrityError:
+    except IntegrityError as error:
         raise ValidationError(
             f"A category named {category.name!r} already exists there."
-        )
+        ) from error
     return category
 
 
@@ -296,7 +296,7 @@ def _validate(rule: models.CategoryRule) -> None:
     try:
         rules.validate_rule(rule.match, rule.pattern)
     except DjangoValidationError as error:
-        raise ValidationError(" ".join(error.messages))
+        raise ValidationError(" ".join(error.messages)) from error
     if (
         rule.amount_min is not None
         and rule.amount_max is not None

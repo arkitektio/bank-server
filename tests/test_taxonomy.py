@@ -4,14 +4,14 @@ import pytest
 from django.db.migrations.state import StateApps
 
 from finance import models, taxonomy
-from tests.conftest import account
+from tests.conftest import AExecute, FakeBank, Link, account, extensions_of
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 CATS = "{ categories(filters: {base: true}) { key name kind parent { key } } }"
 
 
-async def _org_id(link, fakebank) -> int:  # noqa: ANN001
+async def _org_id(link: Link, fakebank: FakeBank) -> int:
     fakebank.scenario([account()])
     connection = await link()
     return (
@@ -20,8 +20,8 @@ async def _org_id(link, fakebank) -> int:  # noqa: ANN001
 
 
 async def test_link_seeds_the_two_level_tree_with_inherited_kinds(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _org_id(link, fakebank)
 
     cats = {c["key"]: c for c in (await aexecute(CATS)).data["categories"]}
@@ -37,7 +37,9 @@ async def test_link_seeds_the_two_level_tree_with_inherited_kinds(
     assert "Hofer" in [t async for t in groceries.terms.values_list("text", flat=True)]
 
 
-async def test_seeding_is_idempotent_and_keeps_user_edits(link, aexecute, fakebank):
+async def test_seeding_is_idempotent_and_keeps_user_edits(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _org_id(link, fakebank)
     groceries = (await models.Category.objects.aget(key="food.groceries")).id
     await aexecute(
@@ -60,8 +62,8 @@ async def test_seeding_is_idempotent_and_keeps_user_edits(link, aexecute, fakeba
 
 
 async def test_a_deleted_base_category_stays_deleted_until_restored(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _org_id(link, fakebank)
     food = (await models.Category.objects.aget(key="food")).id
 
@@ -93,7 +95,9 @@ async def test_a_deleted_base_category_stays_deleted_until_restored(
     }
 
 
-async def test_a_subtree_is_one_kind(link, aexecute, fakebank):
+async def test_a_subtree_is_one_kind(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _org_id(link, fakebank)
     income = (await models.Category.objects.aget(key="income")).id
     food = (await models.Category.objects.aget(key="food")).id
@@ -121,15 +125,15 @@ async def test_a_subtree_is_one_kind(link, aexecute, fakebank):
     )
 
     assert child["kind"] == "INCOME"
-    assert refused.errors[0].extensions["code"] == "VALIDATION_ERROR"
+    assert extensions_of(refused)["code"] == "VALIDATION_ERROR"
     assert moved["kind"] == "EXPENSE"
     kinds = {c.kind async for c in models.Category.objects.filter(parent_id=food)}
     assert kinds == {"TRANSFER"}
 
 
 async def test_seeding_adopts_a_same_named_category_instead_of_duplicating(
-    transactional_db,
-):
+    transactional_db: None,
+) -> None:
     from authentikate.models import Organization
 
     org = await Organization.objects.acreate(identifier="static_issuer#adopt-org")
@@ -148,7 +152,9 @@ async def test_seeding_adopts_a_same_named_category_instead_of_duplicating(
     assert len(food) == 1 and food[0].key == "food"
 
 
-async def test_descriptions_become_terms_and_follow_edits(link, aexecute, fakebank):
+async def test_descriptions_become_terms_and_follow_edits(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _org_id(link, fakebank)
     groceries = (await models.Category.objects.aget(key="food.groceries")).id
 

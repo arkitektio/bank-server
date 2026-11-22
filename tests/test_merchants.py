@@ -4,9 +4,19 @@ Real Postgres with PostGIS (the daten image), fakebank syncs, fakegeo as the geo
 """
 
 import pytest
+from kante.context import HttpContext
 
 from finance import models
-from tests.conftest import account, tx
+from tests.conftest import (
+    AExecute,
+    FakeBank,
+    FakeGeo,
+    Link,
+    account,
+    error_of,
+    extensions_of,
+    tx,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -24,7 +34,13 @@ SHOPS = [
 ]
 
 
-async def _bank(link, aexecute, fakebank, rows, context=None) -> tuple[str, str]:  # noqa: ANN001
+async def _bank(
+    link: Link,
+    aexecute: AExecute,
+    fakebank: FakeBank,
+    rows: list[dict],
+    context: HttpContext | None = None,
+) -> tuple[str, str]:
     ident = f"m-{fakebank.aspsp.replace(' ', '-')}"
     fakebank.scenario([account(ident, transactions=rows)])
     acc = (await link(context))["accounts"][0]["id"]
@@ -32,7 +48,9 @@ async def _bank(link, aexecute, fakebank, rows, context=None) -> tuple[str, str]
     return acc, ident
 
 
-async def _rows(aexecute, acc, context=None) -> dict[str, list[dict]]:  # noqa: ANN001
+async def _rows(
+    aexecute: AExecute, acc: str, context: HttpContext | None = None
+) -> dict[str, list[dict]]:
     out: dict[str, list[dict]] = {}
     for t in (await aexecute(TXS, {"a": acc}, context=context)).data["transactions"]:
         out.setdefault(t["counterparty"], []).append(t)
@@ -44,8 +62,8 @@ def _ids(rows: dict[str, list[dict]], *names: str) -> list[str]:
 
 
 async def test_a_merchant_from_transactions_learns_its_alias_and_discovers_stores(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, ident = await _bank(link, aexecute, fakebank, SHOPS)
     rows = await _rows(aexecute, acc)
 
@@ -95,7 +113,9 @@ async def test_a_merchant_from_transactions_learns_its_alias_and_discovers_store
     )
 
 
-async def test_the_longest_alias_wins(link, aexecute, fakebank):
+async def test_the_longest_alias_wins(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(
         link,
         aexecute,
@@ -117,8 +137,8 @@ async def test_the_longest_alias_wins(link, aexecute, fakebank):
 
 
 async def test_a_merchants_category_categorizes_after_rules_and_never_over_manual(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(link, aexecute, fakebank, SHOPS)
     eating = str((await models.Category.objects.aget(key="food.eating_out")).id)
     leisure = str((await models.Category.objects.aget(key="leisure")).id)
@@ -189,8 +209,8 @@ async def test_a_merchants_category_categorizes_after_rules_and_never_over_manua
 
 
 async def test_candidates_list_recurring_counterparties_without_a_merchant(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _bank(link, aexecute, fakebank, SHOPS)
 
     candidates = (
@@ -206,8 +226,8 @@ async def test_candidates_list_recurring_counterparties_without_a_merchant(
 
 
 async def test_geocoding_fills_a_discovered_store_and_near_finds_it(
-    link, aexecute, fakebank, fakegeo
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, fakegeo: FakeGeo
+) -> None:
     fakegeo.places(
         [
             {
@@ -316,7 +336,9 @@ async def test_geocoding_fills_a_discovered_store_and_near_finds_it(
     assert all(entry["user_agent"] for entry in fakegeo.log())
 
 
-async def test_merge_moves_aliases_locations_and_transactions(link, aexecute, fakebank):
+async def test_merge_moves_aliases_locations_and_transactions(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(
         link, aexecute, fakebank, [*SHOPS, tx("-9.00", "2026-09-09", "SPAR MARKT 3418")]
     )
@@ -353,8 +375,8 @@ async def test_merge_moves_aliases_locations_and_transactions(link, aexecute, fa
 
 
 async def test_manual_assignment_survives_rematching_and_null_hands_back(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(link, aexecute, fakebank, SHOPS)
     await aexecute(CREATE, {"input": {"name": "Spar", "aliases": ["spar"]}})
     bank = (
@@ -394,7 +416,9 @@ async def test_manual_assignment_survives_rematching_and_null_hands_back(
     assert back == {"merchant": {"name": "Spar"}, "merchantSource": "AUTO"}
 
 
-async def test_an_alias_means_one_merchant(link, aexecute, fakebank):
+async def test_an_alias_means_one_merchant(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _bank(link, aexecute, fakebank, SHOPS)
     await aexecute(CREATE, {"input": {"name": "Spar", "aliases": ["spar"]}})
 
@@ -413,17 +437,17 @@ async def test_an_alias_means_one_merchant(link, aexecute, fakebank):
     )  # normalizes to "spar"
 
     assert (
-        clash.errors[0].extensions["code"] == "VALIDATION_ERROR"
-        and "already means 'Spar'" in clash.errors[0].message
+        extensions_of(clash)["code"] == "VALIDATION_ERROR"
+        and "already means 'Spar'" in error_of(clash).message
     )
-    assert empty.errors[0].extensions["code"] == "VALIDATION_ERROR"
-    assert boilerplate.errors[0].extensions["code"] == "VALIDATION_ERROR"
+    assert extensions_of(empty)["code"] == "VALIDATION_ERROR"
+    assert extensions_of(boilerplate)["code"] == "VALIDATION_ERROR"
     assert not await models.Merchant.objects.filter(name="Other").aexists()
 
 
 async def test_merchants_stay_in_their_organization(
-    link, aexecute, fakebank, other_org_context
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, other_org_context: HttpContext
+) -> None:
     acc, _ = await _bank(link, aexecute, fakebank, SHOPS)
     other_acc, _ = await _bank(
         link, aexecute, fakebank, SHOPS, context=other_org_context
@@ -464,15 +488,17 @@ async def test_merchants_stay_in_their_organization(
     assert (
         theirs["Spar Dankt 3418"][0]["merchant"] is None
     )  # another organization's aliases never match here
-    assert probe.errors[0].extensions["code"] == "NOT_FOUND"
+    assert extensions_of(probe)["code"] == "NOT_FOUND"
     assert listed == {"merchants": [], "merchantLocations": []}
-    assert hijack.errors[0].extensions["code"] == "NOT_FOUND"
+    assert extensions_of(hijack)["code"] == "NOT_FOUND"
     assert (
-        by_key.errors[0].extensions["code"] == "NOT_FOUND"
+        extensions_of(by_key)["code"] == "NOT_FOUND"
     )  # keys resolve in the caller's organization only
 
 
-async def test_spending_by_merchant(link, aexecute, fakebank):
+async def test_spending_by_merchant(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _bank(link, aexecute, fakebank, SHOPS)
     await aexecute(CREATE, {"input": {"name": "McDonald's", "aliases": ["mcdonalds"]}})
 
@@ -500,7 +526,9 @@ query($f: MerchantLocationFilter) { merchantLocationsGeojson(filters: $f) {
 """
 
 
-async def test_located_places_come_as_typed_geojson(link, aexecute, fakebank, fakegeo):
+async def test_located_places_come_as_typed_geojson(
+    link: Link, aexecute: AExecute, fakebank: FakeBank, fakegeo: FakeGeo
+) -> None:
     fakegeo.places(
         [
             {
@@ -603,7 +631,9 @@ async def test_located_places_come_as_typed_geojson(link, aexecute, fakebank, fa
     ] and 100 < near["features"][0]["properties"]["distanceMeters"] < 400
 
 
-async def test_link_by_key_and_store_number_and_upsert(link, aexecute, fakebank):
+async def test_link_by_key_and_store_number_and_upsert(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(
         link, aexecute, fakebank, [*SHOPS, tx("-20.00", "2026-09-09", "Kiosk am Eck")]
     )
@@ -662,16 +692,16 @@ async def test_link_by_key_and_store_number_and_upsert(link, aexecute, fakebank)
             "category": {"key": "food.eating_out"},
         }
     ]
-    assert both.errors[0].extensions["code"] == "VALIDATION_ERROR"
-    assert missing.errors[0].extensions["code"] == "NOT_FOUND"
+    assert extensions_of(both)["code"] == "VALIDATION_ERROR"
+    assert extensions_of(missing)["code"] == "NOT_FOUND"
 
 
 MRULE = "mutation($input: CreateMerchantRuleInput!) { createMerchantRule(input: $input) { id merchant { key } location { storeCode } } }"
 
 
 async def test_merchant_rules_map_before_aliases_and_never_over_manual(
-    link, aexecute, fakebank, other_org_context
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, other_org_context: HttpContext
+) -> None:
     rows = [
         *SHOPS,
         tx(
@@ -786,7 +816,9 @@ async def test_merchant_rules_map_before_aliases_and_never_over_manual(
     assert theirs == []
 
 
-async def test_merchant_rules_validate_like_category_rules(link, aexecute, fakebank):
+async def test_merchant_rules_validate_like_category_rules(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _bank(link, aexecute, fakebank, SHOPS)
     await aexecute(CREATE, {"input": {"name": "Spar", "aliases": ["spar"]}})
 
@@ -827,9 +859,9 @@ async def test_merchant_rules_validate_like_category_rules(link, aexecute, fakeb
         allow_errors=True,
     )
 
-    assert bad_regex.errors[0].extensions["code"] == "VALIDATION_ERROR"
-    assert bad_range.errors[0].extensions["code"] == "VALIDATION_ERROR"
-    assert unknown.errors[0].extensions["code"] == "NOT_FOUND"
+    assert extensions_of(bad_regex)["code"] == "VALIDATION_ERROR"
+    assert extensions_of(bad_range)["code"] == "VALIDATION_ERROR"
+    assert extensions_of(unknown)["code"] == "NOT_FOUND"
 
 
 # --- §9: the merchant and place join the transaction's embedding --------------------------------
@@ -844,7 +876,9 @@ def _distance(a: models.Transaction, b: models.Transaction) -> float:
     return 1 - float(va @ vb)
 
 
-async def test_lines_of_one_merchant_become_neighbours(link, aexecute, fakebank):
+async def test_lines_of_one_merchant_become_neighbours(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(
         link,
         aexecute,
@@ -884,8 +918,8 @@ async def test_lines_of_one_merchant_become_neighbours(link, aexecute, fakebank)
 
 
 async def test_the_context_says_merchant_category_and_place_but_not_street_or_store(
-    link, aexecute, fakebank, fakegeo
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, fakegeo: FakeGeo
+) -> None:
     fakegeo.places(
         [
             {
@@ -965,7 +999,9 @@ async def test_the_context_says_merchant_category_and_place_but_not_street_or_st
     assert cleared == "spar"  # the bank line alone
 
 
-async def test_a_hidden_default_category_stays_out(link, aexecute, fakebank):
+async def test_a_hidden_default_category_stays_out(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(link, aexecute, fakebank, SHOPS)
     await models.Category.objects.filter(key="food.eating_out").aupdate(hidden=True)
     await aexecute(
@@ -987,8 +1023,8 @@ MERCHANT_FIGURES = "query($f: MerchantFilter) { merchants(filters: $f) { name tr
 
 
 async def test_a_merchant_lists_its_figures_whatever_the_filter_joins(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(
         link, aexecute, fakebank, [*SHOPS, tx("-2.00", "2026-09-09", "Spar Dankt 3418")]
     )

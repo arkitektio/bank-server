@@ -3,7 +3,7 @@
 import pytest
 
 from finance import models
-from tests.conftest import account, tx
+from tests.conftest import AExecute, FakeBank, Link, account, extensions_of, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -14,7 +14,9 @@ mutation($c: ID!, $field: RuleField!, $pattern: String!, $match: RuleMatch, $pri
 """
 
 
-async def _synced(link, aexecute, fakebank, rows) -> int:  # noqa: ANN001
+async def _synced(
+    link: Link, aexecute: AExecute, fakebank: FakeBank, rows: list[dict]
+) -> int:
     fakebank.scenario([account(transactions=rows)])
     acc_id = (await link())["accounts"][0]["id"]
     await aexecute(
@@ -34,7 +36,9 @@ async def _cat_of(counterparty: str) -> tuple[str | None, str]:
     return (row.category.name if row.category else None, row.category_source)
 
 
-async def test_first_rule_by_priority_wins_and_filters_apply(link, aexecute, fakebank):
+async def test_first_rule_by_priority_wins_and_filters_apply(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _synced(
         link,
         aexecute,
@@ -82,7 +86,9 @@ async def test_first_rule_by_priority_wins_and_filters_apply(link, aexecute, fak
     )  # money in; both rules are OUT-only
 
 
-async def test_regex_rule_and_invalid_regex(link, aexecute, fakebank):
+async def test_regex_rule_and_invalid_regex(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _synced(
         link, aexecute, fakebank, [tx("-9.99", "2026-09-01", "NETFLIX.COM 4432")]
     )
@@ -107,12 +113,12 @@ async def test_regex_rule_and_invalid_regex(link, aexecute, fakebank):
         },
         allow_errors=True,
     )
-    assert bad.errors[0].extensions["code"] == "VALIDATION_ERROR"
+    assert extensions_of(bad)["code"] == "VALIDATION_ERROR"
 
 
 async def test_rules_never_override_manual_and_clearing_hands_back(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _synced(link, aexecute, fakebank, [tx("-40.00", "2026-09-01", "SPAR")])
     tx_id = str((await models.Transaction.objects.aget(counterparty="SPAR")).id)
     await aexecute(
@@ -136,7 +142,9 @@ async def test_rules_never_override_manual_and_clearing_hands_back(
     }
 
 
-async def test_deleting_a_rule_hands_back_what_it_set(link, aexecute, fakebank):
+async def test_deleting_a_rule_hands_back_what_it_set(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _synced(
         link,
         aexecute,
@@ -167,7 +175,9 @@ async def test_deleting_a_rule_hands_back_what_it_set(link, aexecute, fakebank):
     assert await _cat_of("ZZ UNKNOWN SHOP") == (None, "NONE")
 
 
-async def test_rules_apply_on_import(link, aexecute, fakebank):
+async def test_rules_apply_on_import(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await aexecute("mutation { seedDefaultCategories { id } }")
     await aexecute(
         RULE,
@@ -182,7 +192,7 @@ async def test_rules_apply_on_import(link, aexecute, fakebank):
     assert await _cat_of("ACME GmbH") == ("Salary", "RULE")
 
 
-async def test_category_cannot_become_its_own_ancestor(aexecute):
+async def test_category_cannot_become_its_own_ancestor(aexecute: AExecute) -> None:
     parent = await aexecute(
         'mutation { createCategory(input: {name: "Household"}) { id } }'
     )
@@ -198,4 +208,4 @@ async def test_category_cannot_become_its_own_ancestor(aexecute):
         },
         allow_errors=True,
     )
-    assert result.errors[0].extensions["code"] == "VALIDATION_ERROR"
+    assert extensions_of(result)["code"] == "VALIDATION_ERROR"

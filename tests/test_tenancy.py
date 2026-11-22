@@ -5,15 +5,18 @@ of tenant A. A foreign id must look exactly like a missing one (NOT_FOUND).
 """
 
 import pytest
+from kante.context import HttpContext
 
 from finance import models
-from tests.conftest import account, tx
+from tests.conftest import AExecute, FakeBank, Link, account, extensions_of, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
 @pytest.fixture
-async def tenant_a(link, aexecute, fakebank):
+async def tenant_a(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> dict[str, str]:
     fakebank.scenario(
         [account(transactions=[tx("-10.00", "2026-09-01", "Shop")], balance="90.00")]
     )
@@ -48,8 +51,11 @@ LISTS = [
 
 @pytest.mark.parametrize("selection", LISTS)
 async def test_lists_are_empty_for_other_org(
-    tenant_a, aexecute, other_org_context, selection
-):
+    tenant_a: dict[str, str],
+    aexecute: AExecute,
+    other_org_context: HttpContext,
+    selection: str,
+) -> None:
     result = await aexecute(f"query {{ {selection} }}", context=other_org_context)
     assert list(result.data.values())[0] == []
 
@@ -86,18 +92,26 @@ async def test_lists_are_empty_for_other_org(
     ],
 )
 async def test_foreign_ids_are_not_found(
-    tenant_a, aexecute, other_org_context, document, key
-):
+    tenant_a: dict[str, str],
+    aexecute: AExecute,
+    other_org_context: HttpContext,
+    document: str,
+    key: str,
+) -> None:
     result = await aexecute(
         document, {"id": tenant_a[key]}, context=other_org_context, allow_errors=True
     )
     assert result.errors, result.data
-    assert result.errors[0].extensions["code"] == "NOT_FOUND"
+    assert extensions_of(result)["code"] == "NOT_FOUND"
 
 
 async def test_cannot_categorize_with_a_foreign_category(
-    tenant_a, aexecute, other_org_context, link, fakebank
-):
+    tenant_a: dict[str, str],
+    aexecute: AExecute,
+    other_org_context: HttpContext,
+    link: Link,
+    fakebank: FakeBank,
+) -> None:
     """Tenant B's own transaction, tenant A's category: refused."""
     fakebank.scenario([account(transactions=[tx("-1.00", "2026-09-01", "B shop")])])
     b_account = (await link(context=other_org_context))["accounts"][0]["id"]
@@ -116,12 +130,15 @@ async def test_cannot_categorize_with_a_foreign_category(
         context=other_org_context,
         allow_errors=True,
     )
-    assert result.errors[0].extensions["code"] == "NOT_FOUND"
+    assert extensions_of(result)["code"] == "NOT_FOUND"
 
 
 async def test_link_state_from_another_org_is_refused(
-    aexecute, other_org_context, fakebank, eb_provider
-):
+    aexecute: AExecute,
+    other_org_context: HttpContext,
+    fakebank: FakeBank,
+    eb_provider: str,
+) -> None:
     """Tenant B cannot complete a link tenant A started, even holding its code and state."""
     fakebank.scenario([account()])
     started = await aexecute(
@@ -137,11 +154,13 @@ async def test_link_state_from_another_org_is_refused(
         context=other_org_context,
         allow_errors=True,
     )
-    assert result.errors[0].extensions["code"] == "INVALID_STATE"
+    assert extensions_of(result)["code"] == "INVALID_STATE"
     assert not await models.BankAccount.objects.aexists()
 
 
-async def test_stats_do_not_mix_tenants(tenant_a, aexecute, other_org_context):
+async def test_stats_do_not_mix_tenants(
+    tenant_a: dict[str, str], aexecute: AExecute, other_org_context: HttpContext
+) -> None:
     result = await aexecute(
         "query { spendingByCategory { net } cashflow { net } topCounterparties { total } budgetStatus { spent } }",
         context=other_org_context,

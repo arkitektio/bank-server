@@ -3,14 +3,16 @@
 import pytest
 
 from finance import models
-from tests.conftest import account, tx
+from tests.conftest import AExecute, FakeBank, Link, account, extensions_of, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 DELETE = "mutation($id: ID!, $to: ID, $dry: Boolean! = false) { deleteCategory(id: $id, reassignTo: $to, dryRun: $dry) { categories transactions rules budgets dismissedBaseKeys } }"
 
 
-async def _setup(link, aexecute, fakebank) -> tuple[list[str], str, str]:  # noqa: ANN001
+async def _setup(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> tuple[list[str], str, str]:
     fakebank.scenario(
         [
             account(
@@ -62,7 +64,9 @@ async def _setup(link, aexecute, fakebank) -> tuple[list[str], str, str]:  # noq
     return ids, garden, tools
 
 
-async def test_dry_run_reports_without_deleting(link, aexecute, fakebank):
+async def test_dry_run_reports_without_deleting(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     _, garden, _ = await _setup(link, aexecute, fakebank)
 
     report = (await aexecute(DELETE, {"id": garden, "dry": True})).data[
@@ -80,8 +84,8 @@ async def test_dry_run_reports_without_deleting(link, aexecute, fakebank):
 
 
 async def test_reassign_moves_the_subtrees_transactions_as_manual(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     ids, garden, _ = await _setup(link, aexecute, fakebank)
     home = str((await models.Category.objects.aget(key="housing.maintenance")).id)
 
@@ -100,8 +104,8 @@ async def test_reassign_moves_the_subtrees_transactions_as_manual(
 
 
 async def test_without_reassign_rows_go_back_to_rules_and_suggestions(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     ids, garden, _ = await _setup(link, aexecute, fakebank)
     home = str((await models.Category.objects.aget(key="housing.maintenance")).id)
     await aexecute(
@@ -124,9 +128,11 @@ async def test_without_reassign_rows_go_back_to_rules_and_suggestions(
     assert rows["Gardener B"] == (None, "NONE")
 
 
-async def test_cannot_reassign_into_the_deleted_subtree(link, aexecute, fakebank):
+async def test_cannot_reassign_into_the_deleted_subtree(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     _, garden, tools = await _setup(link, aexecute, fakebank)
 
     result = await aexecute(DELETE, {"id": garden, "to": tools}, allow_errors=True)
 
-    assert result.errors[0].extensions["code"] == "VALIDATION_ERROR"
+    assert extensions_of(result)["code"] == "VALIDATION_ERROR"

@@ -14,6 +14,8 @@ asks for ``bank_editor``: a member holding it may link, sync, categorize and bud
 * ``DjangoOptimizerExtension`` — batches/prefetches ORM access to avoid N+1s.
 """
 
+from typing import Any
+
 import strawberry
 import strawberry_django
 from arkitekt_datalayer import mutations as datalayer_mutations
@@ -36,12 +38,14 @@ from finance.types import insights as insight_types
 from finance.types import prices as price_types
 
 
-def field(scope: str = "bank_read", **kwargs):  # noqa: ANN201
+def field(scope: str = "bank_read", **kwargs: Any) -> Any:  # noqa: ANN401 - as strawberry_django's: the value of `x: T = field()`
     """A field an app needs ``scope`` for (``bank_read``, unless it says otherwise)."""
     return strawberry_django.field(extensions=[AuthExtension(scopes=[scope])], **kwargs)
 
 
-def mutation(scope: str = "bank_write", roles: list[str] | None = None, **kwargs):  # noqa: ANN201
+def mutation(
+    scope: str = "bank_write", roles: list[str] | None = None, **kwargs: Any
+) -> Any:  # noqa: ANN401 - as strawberry_django's: the value of `x: T = field()`
     """A write: an app needs ``scope`` for it, a member one of ``roles`` (``bank_editor`` unless it says
     otherwise; ``bank_admin`` holds every role)."""
     return strawberry_django.mutation(
@@ -50,14 +54,14 @@ def mutation(scope: str = "bank_write", roles: list[str] | None = None, **kwargs
     )
 
 
-def access_mutation(**kwargs):  # noqa: ANN201
+def access_mutation(**kwargs: Any) -> Any:  # noqa: ANN401 - as strawberry_django's: the value of `x: T = field()`
     """A mutation that hands out read credentials: a read, for whoever may see what it reads."""
     return strawberry_django.mutation(
         extensions=[AuthExtension(scopes=["bank_read"])], **kwargs
     )
 
 
-def upload_mutation(**kwargs):  # noqa: ANN201
+def upload_mutation(**kwargs: Any) -> Any:  # noqa: ANN401 - as strawberry_django's: the value of `x: T = field()`
     """A mutation that hands out (or finishes) upload credentials: gated by ``datalayer.upload_roles``.
 
     Holding any one of the configured roles is enough. Read once, at schema build -- a change to
@@ -69,7 +73,7 @@ def upload_mutation(**kwargs):  # noqa: ANN201
     )
 
 
-def provider_mutation(**kwargs):  # noqa: ANN201
+def provider_mutation(**kwargs: Any) -> Any:  # noqa: ANN401 - as strawberry_django's: the value of `x: T = field()`
     """A change to the providers banks are linked through: only ``bank_admin`` may, through an app granted ``bank_providers``."""
     return strawberry_django.mutation(
         extensions=[AuthExtension(scopes=["bank_providers"], any_role_of=[ADMIN])],
@@ -77,7 +81,7 @@ def provider_mutation(**kwargs):  # noqa: ANN201
     )
 
 
-def subscription(**kwargs):  # noqa: ANN201
+def subscription(**kwargs: Any) -> Any:  # noqa: ANN401 - as strawberry_django's: the value of `x: T = field()`
     """A subscription: what it streams is read, so an app needs ``bank_read`` for it."""
     return strawberry.subscription(
         extensions=[AuthSubscribeExtension(scopes=["bank_read"])], **kwargs

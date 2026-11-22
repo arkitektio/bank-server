@@ -245,10 +245,10 @@ def create_merchant(info: Info, input: CreateMerchantInput) -> types.Merchant:
                     category=category,
                     online=input.online,
                 )
-        except IntegrityError:
+        except IntegrityError as error:
             raise ValidationError(
                 f"A merchant with key {_pattern(input.key or input.name)!r} already exists (use upsertMerchant to update it)."
-            )
+            ) from error
         _add_aliases(merchant, list(dict.fromkeys(patterns)))
         _refresh(organization.id, merchants.organization_rows(organization.id))
         # Seeds the aliases do not cover (explicit aliases given) are attached by hand.
@@ -274,14 +274,19 @@ def update_merchant(info: Info, input: UpdateMerchantInput) -> types.Merchant:
     return _apply_update(info, merchant, input)
 
 
-def _apply_update(info: Info, merchant: models.Merchant, input) -> models.Merchant:  # noqa: ANN001 - Update/UpsertMerchantInput
+def _apply_update(
+    info: Info,
+    merchant: models.Merchant,
+    input: "UpdateMerchantInput | UpsertMerchantInput",
+) -> models.Merchant:
     recategorize = False
     if input.name is not strawberry.UNSET and input.name:
         merchant.name = input.name.strip()
-    if getattr(input, "key", strawberry.UNSET) not in (
-        strawberry.UNSET,
-        None,
-    ) and not isinstance(input, UpsertMerchantInput):
+    if (
+        isinstance(input, UpdateMerchantInput)
+        and input.key is not strawberry.UNSET
+        and input.key is not None
+    ):
         merchant.key = _pattern(input.key)
     for field in ("description", "website", "logo_url", "online"):
         value = getattr(input, field)
@@ -308,8 +313,10 @@ def _apply_update(info: Info, merchant: models.Merchant, input) -> models.Mercha
     try:
         with db_transaction.atomic():
             merchant.save()
-    except IntegrityError:
-        raise ValidationError(f"A merchant with key {merchant.key!r} already exists.")
+    except IntegrityError as error:
+        raise ValidationError(
+            f"A merchant with key {merchant.key!r} already exists."
+        ) from error
     rows = merchants.organization_rows(merchant.organization_id, merchant.id)
     if recategorize:
         _refresh(merchant.organization_id, rows)
@@ -508,10 +515,10 @@ def _save_location(location: models.MerchantLocation) -> models.MerchantLocation
     try:
         with db_transaction.atomic():
             location.save()
-    except IntegrityError:
+    except IntegrityError as error:
         raise ValidationError(
             f"This merchant already has a place with store number {location.store_code!r}."
-        )
+        ) from error
     location.refresh_from_db()
     return location
 

@@ -1,9 +1,13 @@
+from typing import Any
+
+from django.db.models import Model, QuerySet
+from kante.types import Info
 from strawberry.scalars import JSON
 
 from finance.scoping import scope_queryset
 
 
-def build_prescoped_queryset(info, queryset):
+def build_prescoped_queryset(info: Info, queryset: QuerySet) -> QuerySet:
     """Limit ``queryset`` to the request's organization.
 
     Every type backing a Query field must route its ``get_queryset`` through here:
@@ -24,7 +28,7 @@ class OrgScoped:
     """
 
     @classmethod
-    def get_queryset(cls, queryset, info, **kwargs):
+    def get_queryset(cls, queryset: QuerySet, info: Info, **kwargs: Any) -> QuerySet:
         return build_prescoped_queryset(info, queryset)
 
 
@@ -35,7 +39,7 @@ DESCRIPTORS_DESCRIPTION = (
 )
 
 
-def resolve_descriptors(root) -> JSON:  # noqa: ANN001 - the model instance behind any hosted type
+def resolve_descriptors(root: Model) -> JSON:
     """The descriptors of a hosted object, from its structure's declaration (``bank_server.service``)."""
     from bank_server.service import service  # the declaration imports finance.models
 

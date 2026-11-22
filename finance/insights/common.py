@@ -16,6 +16,7 @@ from decimal import Decimal
 from django.db.models import Count, QuerySet
 from django.db.models.functions import ExtractIsoWeekDay
 from django.utils import timezone
+from kante.types import Info
 
 from finance import enums, models, stats
 from finance.graphql.utils import get_many
@@ -79,10 +80,10 @@ def previous_window(
 
 
 def resolve_window(
-    info,
+    info: Info,
     window: t.StatsWindowInput | None,
     compare: enums.Comparison = enums.Comparison.NONE,
-) -> Window:  # noqa: ANN001
+) -> Window:
     """The org-scoped window a view asked for (the last 12 months by default)."""
     window = window or t.StatsWindowInput()
     end = window.date_to or timezone.now().date()
@@ -235,7 +236,7 @@ def visits(qs: QuerySet, window: Window) -> t.VisitStats:
             average_days_between_visits=None,
             visits_per_month=0.0,
         )
-    gaps = [(b - a).days for a, b in zip(days, days[1:])]
+    gaps = [(b - a).days for a, b in zip(days, days[1:], strict=False)]
     today = timezone.now().date()
     return t.VisitStats(
         visits=len(days),

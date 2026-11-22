@@ -23,19 +23,27 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Literal, Protocol, overload
 
 import psycopg
 import pytest
+from arkitekt_datalayer.datalayer import Datalayer
 from authentikate.models import Client, Membership, Organization, User
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from dokker import testing
-from kante.context import HttpContext, UniversalRequest
+from graphql import GraphQLError
+from kante.context import HttpContext, UniversalRequest, WsContext
+from pytest_django import DjangoDbBlocker
+from pytest_django.fixtures import SettingsWrapper
 from strawberry.http.temporal_response import TemporalResponse
+from strawberry.types import ExecutionResult
 
 from bank_server.schema import schema
+from finance import models
 
 
 @dataclass
@@ -50,20 +58,77 @@ class Stack:
     fakemarket_url: str = ""
 
 
-def _wait(check, what: str, timeout: float = 60) -> None:  # noqa: ANN001
+#: A GraphQL document's variables, as a test writes them.
+Variables = Mapping[str, object]
+
+
+class Answer(Protocol):
+    """A GraphQL result without errors: its data is there (strawberry's own ``dict[str, Any]``)."""
+
+    @property
+    def data(self) -> dict[str, Any]: ...
+
+    @property
+    def errors(self) -> list[GraphQLError] | None: ...
+
+
+class Link(Protocol):
+    """Links this test's bank (or Scalable person) as tenant A or ``context``; returns the connection."""
+
+    async def __call__(self, context: HttpContext | None = None) -> dict: ...
+
+
+class ProviderFor(Protocol):
+    """The id of the provider of a kind in tenant A's (or ``context``'s) organization."""
+
+    async def __call__(
+        self, kind: str = "ENABLEBANKING", context: HttpContext | None = None
+    ) -> str: ...
+
+
+class WsContexts(Protocol):
+    """Makes a websocket context authenticated by a static token."""
+
+    async def __call__(self, token: str = "test") -> WsContext: ...
+
+
+class Subscribe(Protocol):
+    """Starts a subscription as a static token."""
+
+    async def __call__(
+        self,
+        query: str,
+        variables: dict | None = None,
+        token: str = "test",
+        group: str | None = None,
+    ) -> "Subscription": ...
+
+
+class Upload(Protocol):
+    """Uploads bytes as a client does; returns the store id."""
+
+    async def __call__(
+        self,
+        content: bytes,
+        name: str = "export.xlsx",
+        context: HttpContext | None = None,
+    ) -> str: ...
+
+
+def _wait(check: Callable[[], object], what: str, timeout: float = 60) -> None:
     deadline = time.monotonic() + timeout
     while True:
         try:
             check()
             return
-        except Exception:
+        except Exception as error:
             if time.monotonic() >= deadline:
-                raise RuntimeError(f"{what} did not come up in {timeout}s")
+                raise RuntimeError(f"{what} did not come up in {timeout}s") from error
             time.sleep(0.2)
 
 
 @pytest.fixture(scope="session")
-def backend_stack():
+def backend_stack() -> Iterator[Stack]:
     """Bring up postgres + fakebank and yield the host ports docker gave them.
 
     No host port is pinned in the compose file: dokker mints a unique project per run and
@@ -146,7 +211,7 @@ def backend_stack():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def embedding_model_warm():
+def embedding_model_warm() -> Iterator[None]:
     """Load the embedding model once per session, outside any test's DB transaction (as rekuest does)."""
     from embeddings import engine
 
@@ -155,7 +220,7 @@ def embedding_model_warm():
 
 
 @pytest.fixture(scope="session")
-def django_db_modify_db_settings(backend_stack):
+def django_db_modify_db_settings(backend_stack: Stack) -> Iterator[None]:
     """Point Django at the stack's postgres before pytest-django creates the test database."""
     from django.conf import settings
 
@@ -164,7 +229,9 @@ def django_db_modify_db_settings(backend_stack):
 
 
 @pytest.fixture(scope="session")
-def django_db_setup(django_db_setup, django_db_blocker):
+def django_db_setup(
+    django_db_setup: None, django_db_blocker: DjangoDbBlocker
+) -> Iterator[None]:
     """Kill the connections of asgiref's executor threads before the test database is dropped.
 
     ``database_sync_to_async`` runs ORM code in threads whose connections outlive the tests and
@@ -221,7 +288,9 @@ def register_application(
 
 
 @pytest.fixture(scope="session", autouse=True)
-def providers_endpoints(backend_stack, tmp_path_factory):
+def providers_endpoints(
+    backend_stack: Stack, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[None]:
     """Point the provider kinds at the fakes of the stack, with a Fernet key generated for the run. Nothing is committed."""
     from cryptography.fernet import Fernet
     from django.conf import settings
@@ -243,7 +312,7 @@ def providers_endpoints(backend_stack, tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def application(backend_stack, providers_endpoints) -> Application:
+def application(backend_stack: Stack, providers_endpoints: None) -> Application:
     """The run's Enable Banking application (kid ``test-app``), known to fakebank."""
     return register_application(backend_stack.fakebank_url, "test-app")
 
@@ -315,7 +384,7 @@ class FakeBank:
 
 
 @pytest.fixture
-def fakebank(backend_stack) -> FakeBank:
+def fakebank(backend_stack: Stack) -> Iterator[FakeBank]:
     bank = FakeBank(backend_stack.fakebank_url)
     yield bank
     bank.release()  # never leave requests parked for the next test
@@ -359,7 +428,7 @@ class FakeScalable:
     def families(self) -> list[dict]:
         return _get(self.url + f"/_admin/families?person={self.person}")["families"]
 
-    def config(self, **values) -> None:  # noqa: ANN003
+    def config(self, **values: object) -> None:
         _post(self.url + "/_admin/config", values)
 
     def hold(self) -> None:
@@ -383,7 +452,7 @@ class FakeScalable:
 
 
 @pytest.fixture
-def fakescalable(backend_stack) -> FakeScalable:
+def fakescalable(backend_stack: Stack) -> Iterator[FakeScalable]:
     fake = FakeScalable(backend_stack.fakescalable_url)
     defaults = {
         "token_ttl": 1200,
@@ -491,12 +560,14 @@ def cash(
 #: An auth session, as the external auth flow contract shapes it.
 SESSION = "state status finish openUrl expiresAt redirectUrl interval userCode step errorCode errorMessage result { identifier id label }"
 SCALABLE_START = (
-    "mutation Start($provider: ID!) { startLink(input: {provider: $provider}) { %s } }"
-    % SESSION
+    "mutation Start($provider: ID!) { startLink(input: {provider: $provider}) { "
+    + SESSION
+    + " } }"
 )
 SCALABLE_COMPLETE = (
-    "mutation Complete($state: String!) { completeAuth(input: {state: $state}) { %s } }"
-    % SESSION
+    "mutation Complete($state: String!) { completeAuth(input: {state: $state}) { "
+    + SESSION
+    + " } }"
 )
 CONNECTION = """
 query($id: ID!) { bankConnection(id: $id) { id status linkStep lastError validUntil creator { id sub preferredUsername } accounts { id iban currency kind name } } }
@@ -504,7 +575,7 @@ query($id: ID!) { bankConnection(id: $id) { id status linkStep lastError validUn
 
 
 async def connection_of(
-    aexecute, session: dict, context: HttpContext | None = None
+    aexecute: "AExecute", session: dict, context: HttpContext | None = None
 ) -> dict:
     """The connection a DONE auth session linked, as a client reads it."""
     assert session["status"] == "DONE", session
@@ -515,7 +586,9 @@ async def connection_of(
 
 
 @pytest.fixture
-def scalable_link(aexecute, fakescalable, provider_for):
+def scalable_link(
+    aexecute: "AExecute", fakescalable: FakeScalable, provider_for: ProviderFor
+) -> Link:
     """Link this test's Scalable person as tenant A (or ``context``); returns the ACTIVE connection."""
 
     async def _link(context: HttpContext | None = None) -> dict:
@@ -630,31 +703,31 @@ def _context(
 
 
 @pytest.fixture
-def authenticated_context(transactional_db) -> HttpContext:
+def authenticated_context(transactional_db: None) -> HttpContext:
     """Tenant A: the static ``test`` token's identity in ``static_org``."""
     return _context("test", "1", "static_org")
 
 
 @pytest.fixture
-def admin_context(transactional_db) -> HttpContext:
+def admin_context(transactional_db: None) -> HttpContext:
     """Bank's admin in tenant A (``static_org``): the only role that may set providers up."""
     return _context("admin", "3", "static_org", roles=["bank_admin"])
 
 
 @pytest.fixture
-def colleague_context(transactional_db) -> HttpContext:
+def colleague_context(transactional_db: None) -> HttpContext:
     """Another member of tenant A (``static_org``): same organization, different user."""
     return _context("colleague", "2", "static_org")
 
 
 @pytest.fixture
-def other_org_context(transactional_db) -> HttpContext:
+def other_org_context(transactional_db: None) -> HttpContext:
     """Tenant B: the static ``othertest`` token's identity in ``other_org``."""
     return _context("othertest", "9", "other_org")
 
 
 @pytest.fixture
-async def ws_contexts(authenticated_context):
+async def ws_contexts(authenticated_context: HttpContext) -> AsyncIterator[WsContexts]:
     """A factory for websocket contexts, to run subscriptions in-process against the in-memory channel layer.
 
     Each context gets its own consumer, plus a pump task that feeds the layer's messages into the
@@ -670,7 +743,7 @@ async def ws_contexts(authenticated_context):
 
     layer = get_channel_layer()
     await layer.flush()  # a process-wide singleton: drop what earlier tests left
-    pumps = []
+    pumps: list[asyncio.Task[None]] = []
 
     async def make(token: str = "test") -> WsContext:
         consumer = ChannelsConsumer()
@@ -699,18 +772,18 @@ async def ws_contexts(authenticated_context):
 class Subscription:
     """A running subscription: its events land in a queue (``next``), its first frame is awaited by ``start``."""
 
-    def __init__(self, context, query: str, variables: dict) -> None:  # noqa: ANN001
+    def __init__(self, context: WsContext, query: str, variables: dict) -> None:
         import asyncio
 
         self.context, self.query, self.variables = context, query, variables
-        self.events: asyncio.Queue = asyncio.Queue()
+        self.events: asyncio.Queue[ExecutionResult] = asyncio.Queue()
         self.task: asyncio.Task | None = None
 
     async def _run(self) -> None:
         stream = await schema.subscribe(
             self.query, variable_values=self.variables, context_value=self.context
         )
-        if not hasattr(stream, "__aiter__"):
+        if isinstance(stream, ExecutionResult):  # refused before it started
             await self.events.put(stream)
             return
         async for result in stream:
@@ -735,15 +808,16 @@ class Subscription:
             raise AssertionError(f"the subscription never joined {group}")
         return self
 
-    async def next(self, timeout: float = 5):  # noqa: ANN201
+    async def next(self, timeout: float = 5) -> dict[str, Any]:
         """The next result; fails the test on GraphQL errors."""
         import asyncio
 
         result = await asyncio.wait_for(self.events.get(), timeout)
         assert not result.errors, result.errors
+        assert result.data is not None
         return result.data
 
-    async def error(self, timeout: float = 5):  # noqa: ANN201
+    async def error(self, timeout: float = 5) -> GraphQLError:
         """The next result, which must be an error."""
         import asyncio
 
@@ -772,7 +846,7 @@ class Subscription:
 
 
 @pytest.fixture
-async def subscribe(ws_contexts):
+async def subscribe(ws_contexts: WsContexts) -> AsyncIterator[Subscribe]:
     """Start a subscription as a static token; stopped after the test."""
     started: list[Subscription] = []
 
@@ -793,36 +867,75 @@ async def subscribe(ws_contexts):
         await subscription.stop()
 
 
-@pytest.fixture
-def aexecute(authenticated_context):
-    """Run a GraphQL document as tenant A (or ``context``); fails the test on GraphQL errors unless ``allow_errors``."""
+class AExecute:
+    """Runs a GraphQL document as tenant A (or ``context``); fails the test on GraphQL errors unless ``allow_errors``."""
 
-    async def _run(
+    def __init__(self, authenticated_context: HttpContext) -> None:
+        self.authenticated_context = authenticated_context
+
+    @overload
+    async def __call__(
+        self,
         query: str,
-        variables: dict | None = None,
+        variables: Variables | None = None,
+        context: HttpContext | None = None,
+        allow_errors: Literal[False] = False,
+    ) -> Answer: ...
+
+    @overload
+    async def __call__(
+        self,
+        query: str,
+        variables: Variables | None = None,
+        context: HttpContext | None = None,
+        *,
+        allow_errors: bool,
+    ) -> ExecutionResult: ...
+
+    async def __call__(
+        self,
+        query: str,
+        variables: Variables | None = None,
         context: HttpContext | None = None,
         allow_errors: bool = False,
-    ):
+    ) -> Answer | ExecutionResult:
         result = await schema.execute(
             query,
-            variable_values=variables or {},
-            context_value=context or authenticated_context,
+            variable_values=dict(variables or {}),
+            context_value=context or self.authenticated_context,
         )
         if not allow_errors:
             assert not result.errors, result.errors
         return result
 
-    return _run
+
+def error_of(result: Answer | ExecutionResult) -> GraphQLError:
+    """The first error of a result that has to have failed."""
+    assert result.errors, result.data
+    return result.errors[0]
+
+
+def extensions_of(result: Answer | ExecutionResult) -> dict[str, Any]:
+    """The extensions of a failed result's first error (graphql-core's own ``dict[str, Any]``)."""
+    extensions = error_of(result).extensions
+    assert extensions is not None
+    return extensions
+
+
+@pytest.fixture
+def aexecute(authenticated_context: HttpContext) -> AExecute:
+    """Run a GraphQL document as tenant A (or ``context``); fails the test on GraphQL errors unless ``allow_errors``."""
+    return AExecute(authenticated_context)
 
 
 def make_provider(
     organization: Organization,
     kind: str,
     application: Application | None = None,
-    **fields,
-) -> "models.BankProvider":  # noqa: ANN003, F821
+    **fields: object,
+) -> models.BankProvider:
     """A provider row as an admin's mutation would leave it (``tests/test_providers.py`` covers the mutations themselves)."""
-    from finance import crypto, models
+    from finance import crypto
     from finance.providers.enablebanking import read_key
     from finance.providers.registry import kind_of
 
@@ -848,11 +961,11 @@ def make_provider(
 
 
 @pytest.fixture
-def provider_for(authenticated_context, application):
+def provider_for(
+    authenticated_context: HttpContext, application: Application
+) -> ProviderFor:
     """The id of the provider of a kind in tenant A's (or ``context``'s) organization, set up on first use."""
     from channels.db import database_sync_to_async
-
-    from finance import models
 
     def _get(kind: str, context: HttpContext | None) -> str:
         organization = (context or authenticated_context).request.organization
@@ -872,7 +985,7 @@ def provider_for(authenticated_context, application):
 
 
 @pytest.fixture
-def eb_provider(authenticated_context, application) -> str:
+def eb_provider(authenticated_context: HttpContext, application: Application) -> str:
     """Tenant A's Enable Banking provider (its id), for tests that start links themselves."""
     return str(
         make_provider(
@@ -882,23 +995,25 @@ def eb_provider(authenticated_context, application) -> str:
 
 
 @pytest.fixture
-def sc_provider(authenticated_context) -> str:
+def sc_provider(authenticated_context: HttpContext) -> str:
     """Tenant A's Scalable provider (its id)."""
     return str(make_provider(authenticated_context.request.organization, "SCALABLE").id)
 
 
 LINK = (
-    'mutation Start($provider: ID!, $aspsp: String!) { startLink(input: {provider: $provider, institution: $aspsp, country: "AT"}) { %s } }'
-    % SESSION
+    'mutation Start($provider: ID!, $aspsp: String!) { startLink(input: {provider: $provider, institution: $aspsp, country: "AT"}) { '
+    + SESSION
+    + " } }"
 )
 COMPLETE = (
-    "mutation Complete($code: String, $state: String!, $error: String, $description: String) { completeAuth(input: {code: $code, state: $state, error: $error, errorDescription: $description}) { %s } }"
-    % SESSION
+    "mutation Complete($code: String, $state: String!, $error: String, $description: String) { completeAuth(input: {code: $code, state: $state, error: $error, errorDescription: $description}) { "
+    + SESSION
+    + " } }"
 )
 
 
 @pytest.fixture
-def link(aexecute, fakebank, provider_for):
+def link(aexecute: AExecute, fakebank: FakeBank, provider_for: ProviderFor) -> Link:
     """Link this test's fake bank as tenant A (or ``context``); returns the completed connection."""
 
     async def _link(context: HttpContext | None = None) -> dict:
@@ -917,7 +1032,7 @@ def link(aexecute, fakebank, provider_for):
 
 
 @pytest.fixture(scope="session")
-def datalayer(backend_stack):
+def datalayer(backend_stack: Stack) -> Iterator[Datalayer]:
     """The datalayer pointed at the stack's RustFS (root keys, as the deployment's service user), with its bucket."""
     import arkitekt_datalayer.datalayer as dl_module
     import boto3
@@ -953,7 +1068,7 @@ FINISH_UPLOAD = "mutation($id: String!) { finishBigfileUpload(input: {storeId: $
 
 
 @pytest.fixture
-def upload(aexecute, datalayer, backend_stack):
+def upload(aexecute: AExecute, datalayer: Datalayer, backend_stack: Stack) -> Upload:
     """Upload bytes as a client does: a scoped grant, a PUT with its temporary credentials, finish. Returns the store id."""
     import boto3
     from botocore.config import Config
@@ -1005,7 +1120,7 @@ class FakeGeo:
 
 
 @pytest.fixture
-def fakegeo(backend_stack, settings) -> FakeGeo:
+def fakegeo(backend_stack: Stack, settings: SettingsWrapper) -> Iterator[FakeGeo]:
     """Point geocoding at fakegeo, with no places until the test adds some."""
     settings.GEOCODING = {
         **settings.GEOCODING,
@@ -1025,7 +1140,7 @@ TWELVEDATA_KEY = "test-twelvedata-key"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def prices_offline(backend_stack):
+def prices_offline(backend_stack: Stack) -> Iterator[dict]:
     """Every public price API points at fakemarket, so no test reaches the internet."""
     from django.conf import settings
 
@@ -1061,7 +1176,7 @@ class FakeMarket:
 
 
 @pytest.fixture
-def fakemarket(backend_stack, settings) -> FakeMarket:
+def fakemarket(backend_stack: Stack, settings: SettingsWrapper) -> Iterator[FakeMarket]:
     market = FakeMarket(backend_stack.fakemarket_url)
     market.reset()
     yield market

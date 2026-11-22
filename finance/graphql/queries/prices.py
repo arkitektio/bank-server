@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import strawberry
 from django.db.models import Max
+from django.utils import timezone
 from kante.errors import NotFound
 from kante.types import Info
 
@@ -35,8 +36,12 @@ def security_listings(info: Info, isin: str | None = None) -> list[t.SecurityLis
 
 
 def _series(
-    organization_id: int, isin: str, date_from, date_to, source
-) -> t.PriceSeries:  # noqa: ANN001
+    organization_id: int,
+    isin: str,
+    date_from: datetime.date | None,
+    date_to: datetime.date | None,
+    source: enums.PriceSource | None,
+) -> t.PriceSeries:
     found = service.series(
         organization_id, isin, date_from, date_to, source.value if source else None
     )
@@ -103,7 +108,7 @@ def position_performance(
 ) -> list[t.PositionPerformance]:
     """How each current depot position's price moved over a window (the last 30 days by default), biggest move in value first."""
     organization_id = info.context.request.organization.id
-    end = date_to or datetime.date.today()
+    end = date_to or timezone.localdate()
     start = date_from or end - datetime.timedelta(days=30)
     depots = for_org(models.BankAccount, info).filter(kind=models.AccountKind.DEPOT)
     if accounts:

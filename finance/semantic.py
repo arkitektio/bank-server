@@ -19,6 +19,7 @@ neighbours, or a near-exact term hit. Rules override SEMANTIC, users override ev
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from django.conf import settings
@@ -113,7 +114,7 @@ class Suggestion:
     evidence: list[models.Transaction] = field(default_factory=list)
 
 
-def _compatible_kinds(amount: Any) -> list[str]:
+def _compatible_kinds(amount: Decimal | None) -> list[str]:
     if amount is None or amount == 0:
         return list(models.CategoryKind.values)
     if amount < 0:

@@ -9,14 +9,19 @@ All calls are async (aiohttp) and happen only inside a request that asks.
 """
 
 import datetime
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import aiohttp
 from django.conf import settings
+from django.utils import timezone
 
 from finance import models
+
+if TYPE_CHECKING:
+    from finance.scalable.tokens import Session
 
 
 class PriceError(Exception):
@@ -86,11 +91,11 @@ EXCHANGES: dict[str, tuple[str, str | None]] = {
 }
 
 
-def _decimal(value: Any) -> Decimal | None:
+def _decimal(value: Decimal | float | str | None) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
 
-async def _get(http: aiohttp.ClientSession, url: str, **kwargs: Any) -> Any:
+async def _get(http: aiohttp.ClientSession, url: str, **kwargs: Any) -> dict[str, Any]:
     try:
         async with http.get(url, **kwargs) as response:
             body = await response.json(content_type=None)
@@ -245,7 +250,7 @@ class Yahoo:
                 datetime.datetime.fromtimestamp(ts, datetime.UTC).date(),
                 Decimal(str(round(close, 4))),
             )  # Yahoo sends binary floats
-            for ts, close in zip(result.get("timestamp") or [], closes)
+            for ts, close in zip(result.get("timestamp") or [], closes, strict=False)
             if close is not None
         ]
         return _daily(points, currency, start, end)
@@ -360,7 +365,11 @@ class Scalable:
     def symbol_for(self, isin: str, figi: Figi | None) -> tuple[str, str | None] | None:
         return isin, None  # Scalable prices by ISIN
 
-    async def _call(self, operation: str, variables_of) -> dict:  # noqa: ANN001 - (session, portfolio) -> variables
+    async def _call(
+        self,
+        operation: str,
+        variables_of: "Callable[[Session, str | None], dict]",
+    ) -> dict:
         from finance.scalable.client import ScalableClient
         from finance.scalable.tokens import session_for
 
@@ -403,7 +412,7 @@ class Scalable:
     async def history(
         self, listing: models.SecurityListing, start: datetime.date, end: datetime.date
     ) -> list[PricePoint]:
-        days = (datetime.date.today() - start).days + 1
+        days = (timezone.localdate() - start).days + 1
         timeframe = next(
             (name for limit, name in self.TIMEFRAMES if days <= limit), "MAX"
         )

@@ -8,17 +8,29 @@ import asyncio
 import io
 import threading
 import uuid
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from channels.db import database_sync_to_async
+from kante.context import HttpContext
 from openpyxl import Workbook
 
 from finance import models
 from finance.imports.finanzguru import COLUMNS, ExportError, parse
 from finance.sync import sync_account
 
-from .conftest import account, tx
+from .conftest import (
+    AExecute,
+    FakeBank,
+    Link,
+    Upload,
+    account,
+    error_of,
+    extensions_of,
+    tx,
+)
 
 # --- Building exports ---------------------------------------------------------------------------
 
@@ -79,7 +91,7 @@ def xlsx(rows: list[dict]) -> bytes:
 
 
 def csv_export(rows: list[dict]) -> bytes:
-    def cell(value) -> str:  # noqa: ANN001
+    def cell(value: object) -> str:
         if isinstance(value, float):
             return f"{value:.2f}".replace(".", ",")
         return "" if value is None else str(value)
@@ -93,7 +105,7 @@ def csv_export(rows: list[dict]) -> bytes:
 # --- Parsing (no database) ----------------------------------------------------------------------
 
 
-def test_parse_reads_xlsx_and_german_csv_alike():
+def test_parse_reads_xlsx_and_german_csv_alike() -> None:
     account_iban = iban()
     rows = [
         fg(
@@ -125,7 +137,7 @@ def test_parse_reads_xlsx_and_german_csv_alike():
         assert row.extra["kind"] == "Lastschrift"
 
 
-def test_parse_keeps_only_ibans_as_counterparty_iban():
+def test_parse_keeps_only_ibans_as_counterparty_iban() -> None:
     parsed = parse(
         xlsx(
             [
@@ -156,7 +168,7 @@ def test_parse_keeps_only_ibans_as_counterparty_iban():
     assert parsed.rows[1].counterparty_iban == "DE89370400440532013000"
 
 
-def test_parse_folds_split_parts_into_their_booking():
+def test_parse_folds_split_parts_into_their_booking() -> None:
     ref = iban()
     parsed = parse(
         xlsx(
@@ -217,12 +229,12 @@ def test_parse_folds_split_parts_into_their_booking():
     assert by_id["200"].amount == Decimal("-10.00") and by_id["200"].sub == "Hobby"
 
 
-def test_parse_refuses_a_file_without_the_header():
+def test_parse_refuses_a_file_without_the_header() -> None:
     with pytest.raises(ExportError):
         parse(b"Datum;Betrag\n01.01.2026;5\n")
 
 
-def test_parse_skips_repeated_booking_ids_with_a_warning():
+def test_parse_skips_repeated_booking_ids_with_a_warning() -> None:
     ref = iban()
     parsed = parse(
         xlsx(
@@ -255,11 +267,15 @@ MAPPINGS = "query { importCategoryMappings { main sub proposed category { key } 
 SYNC = "mutation Sync($id: ID!) { syncAccount(id: $id) { created updated } }"
 
 
+#: Uploads an export (its rows) and previews it; returns the preview.
+ImportFile = Callable[..., Awaitable[dict]]
+
+
 @pytest.fixture
-def import_file(aexecute, upload):
+def import_file(aexecute: AExecute, upload: Upload) -> ImportFile:
     """Upload an export and preview it; returns the preview."""
 
-    async def _import(rows: list[dict], context=None) -> dict:  # noqa: ANN001
+    async def _import(rows: list[dict], context: HttpContext | None = None) -> dict:
         store = await upload(xlsx(rows), name="finanzguru.xlsx", context=context)
         return (await aexecute(CREATE, {"file": store}, context=context)).data[
             "createFinanzguruImport"
@@ -277,7 +293,9 @@ async def _rows(account_id: int) -> list[models.Transaction]:
     ]
 
 
-async def test_preview_writes_nothing_and_proposes_mappings(import_file, aexecute):
+async def test_preview_writes_nothing_and_proposes_mappings(
+    import_file: ImportFile, aexecute: AExecute
+) -> None:
     dead, card = iban(), "4111 **** **** 1111"
     preview = await import_file(
         [
@@ -339,8 +357,8 @@ async def test_preview_writes_nothing_and_proposes_mappings(import_file, aexecut
 
 
 async def test_apply_creates_import_only_accounts_and_is_idempotent(
-    import_file, aexecute
-):
+    import_file: ImportFile, aexecute: AExecute
+) -> None:
     dead = iban()
     rows = [
         fg(
@@ -413,8 +431,8 @@ async def test_apply_creates_import_only_accounts_and_is_idempotent(
 
 
 async def test_import_into_a_synced_account_enriches_the_synced_rows(
-    link, aexecute, fakebank, import_file
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, import_file: ImportFile
+) -> None:
     """The same bookings as the bank has — other text, a day off — become annotations, not duplicates."""
     giro = iban()
     fakebank.scenario(
@@ -482,8 +500,8 @@ async def test_import_into_a_synced_account_enriches_the_synced_rows(
 
 
 async def test_a_later_sync_takes_over_imported_rows(
-    link, aexecute, fakebank, import_file
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, import_file: ImportFile
+) -> None:
     """Import a dead account's history, then link the bank: the account is adopted and synced rows replace imported ones."""
     giro = iban()
     preview = await import_file(
@@ -543,7 +561,9 @@ async def test_a_later_sync_takes_over_imported_rows(
     assert rows["Bakery"].origin == "SYNC"
 
 
-async def test_splits_are_one_booking(import_file, aexecute):
+async def test_splits_are_one_booking(
+    import_file: ImportFile, aexecute: AExecute
+) -> None:
     ref = iban()
     preview = await import_file(
         [
@@ -579,8 +599,8 @@ async def test_splits_are_one_booking(import_file, aexecute):
 
 
 async def test_umbuchung_is_kept_and_rules_leave_imported_categories_alone(
-    import_file, aexecute
-):
+    import_file: ImportFile, aexecute: AExecute
+) -> None:
     ref, savings = iban(), iban()
     await aexecute("mutation { seedDefaultCategories { id } }")
     other = await models.Category.objects.aget(key="leisure.hobbies")
@@ -630,8 +650,8 @@ async def test_umbuchung_is_kept_and_rules_leave_imported_categories_alone(
 
 
 async def test_ambiguous_iban_needs_a_choice(
-    import_file, aexecute, authenticated_context
-):
+    import_file: ImportFile, aexecute: AExecute, authenticated_context: HttpContext
+) -> None:
     shared = iban()
     org = authenticated_context.request.organization
     pockets = [
@@ -647,7 +667,7 @@ async def test_ambiguous_iban_needs_a_choice(
         str(p.id) for p in pockets
     )
     refused = await aexecute(APPLY, {"id": preview["id"]}, allow_errors=True)
-    assert "choose" in refused.errors[0].message
+    assert "choose" in error_of(refused).message
 
     chosen = (
         await aexecute(
@@ -662,7 +682,9 @@ async def test_ambiguous_iban_needs_a_choice(
     assert await models.Transaction.objects.filter(account=pockets[1]).acount() == 1
 
 
-async def test_editing_a_mapping_recategorizes_on_reapply(import_file, aexecute):
+async def test_editing_a_mapping_recategorizes_on_reapply(
+    import_file: ImportFile, aexecute: AExecute
+) -> None:
     ref = iban()
     preview = await import_file(
         [
@@ -710,19 +732,19 @@ async def test_editing_a_mapping_recategorizes_on_reapply(import_file, aexecute)
 
 
 async def test_other_organizations_cannot_import_my_upload(
-    upload, aexecute, other_org_context
-):
+    upload: Upload, aexecute: AExecute, other_org_context: HttpContext
+) -> None:
     store = await upload(xlsx([fg("1", iban(), "01.09.2026", "-5", "X")]))
 
     result = await aexecute(
         CREATE, {"file": store}, context=other_org_context, allow_errors=True
     )
 
-    assert result.errors and result.errors[0].extensions["code"] == "NOT_FOUND"
+    assert result.errors and extensions_of(result)["code"] == "NOT_FOUND"
 
 
-def _in_thread(fn):  # noqa: ANN001, ANN202
-    outcome: dict = {}
+def _in_thread(fn: Callable[[], object]) -> tuple[threading.Thread, dict[str, object]]:
+    outcome: dict[str, object] = {}
 
     def run() -> None:
         from django.db import connection
@@ -740,8 +762,8 @@ def _in_thread(fn):  # noqa: ANN001, ANN202
 
 
 async def test_an_import_landing_during_a_sync_is_taken_over_not_duplicated(
-    link, aexecute, fakebank, import_file
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, import_file: ImportFile
+) -> None:
     """The sync is parked mid-fetch (no lock held); the import writes; the sync's write then pairs with the imported rows."""
     from finance.imports import apply as importing
 
@@ -811,8 +833,8 @@ async def test_an_import_landing_during_a_sync_is_taken_over_not_duplicated(
 
 
 async def test_the_command_previews_and_applies_a_local_file(
-    tmp_path, authenticated_context
-):
+    tmp_path: Path, authenticated_context: HttpContext
+) -> None:
     from django.core.management import call_command
 
     ref = iban()

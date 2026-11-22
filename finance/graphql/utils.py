@@ -16,15 +16,15 @@ def get_or_404(model: type[M], info: Info, id: object) -> M:
     try:
         return get_for_org(model, info, id=id)  # type: ignore[return-value]
     except (model.DoesNotExist, ValueError):  # type: ignore[attr-defined]
-        raise NotFound(f"{model.__name__} {id} does not exist.")
+        raise NotFound(f"{model.__name__} {id} does not exist.") from None
 
 
-async def aget_or_404(model: type[M], info: Info, id: object, **kwargs) -> M:
+async def aget_or_404(model: type[M], info: Info, id: object, **kwargs: object) -> M:
     """Async :func:`get_or_404`; ``kwargs`` narrow further (e.g. ``select_related``-free filters)."""
     try:
         return await aget_for_org(model, info, id=id, **kwargs)  # type: ignore[return-value]
     except (model.DoesNotExist, ValueError):  # type: ignore[attr-defined]
-        raise NotFound(f"{model.__name__} {id} does not exist.")
+        raise NotFound(f"{model.__name__} {id} does not exist.") from None
 
 
 def get_many(model: type[M], info: Info, ids: list | None) -> list[M]:

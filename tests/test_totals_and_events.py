@@ -9,22 +9,36 @@ from decimal import Decimal
 import pytest
 from authentikate.models import Organization
 from django.utils import timezone
+from kante.context import HttpContext
 
 from finance import models
 from finance.channels import auth_group, org_group
-from tests.conftest import COMPLETE, LINK, account, cash, holding, trade, tx
+from tests.conftest import (
+    COMPLETE,
+    LINK,
+    AExecute,
+    FakeBank,
+    FakeScalable,
+    Link,
+    Subscribe,
+    account,
+    cash,
+    holding,
+    trade,
+    tx,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 SYNC = "mutation($id: ID!) { syncAccount(id: $id) { created } }"
 SESSION = "state status errorCode"
-AUTH = "subscription($s: String!) { authSession(state: $s) { %s } }" % SESSION
+AUTH = "subscription($s: String!) { authSession(state: $s) { " + SESSION + " } }"
 SYNCS = "subscription($a: ID) { accountSyncs(account: $a) { accountId created } }"
 
 
 async def test_candidate_count_covers_every_candidate_past_the_limit(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     rows = [
         tx("-12.00", "2026-09-01", "Spar Dankt 3418"),
         tx("-30.00", "2026-09-03", "Spar Dankt 3428"),
@@ -52,7 +66,9 @@ async def test_candidate_count_covers_every_candidate_past_the_limit(
     ] == 1
 
 
-async def test_needs_reauth_filters_like_the_field(link, aexecute, fakebank):
+async def test_needs_reauth_filters_like_the_field(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account()])
     connection = (await link())["id"]
     query = "query($v: Boolean!) { bankConnections(filters: {needsReauth: $v}) { id needsReauth } }"
@@ -81,8 +97,8 @@ async def test_needs_reauth_filters_like_the_field(link, aexecute, fakebank):
 
 
 async def test_balance_totals_sum_each_accounts_latest_balance(
-    link, aexecute, fakebank, other_org_context
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, other_org_context: HttpContext
+) -> None:
     fakebank.scenario(
         [
             account(balance="100.00"),
@@ -140,8 +156,8 @@ async def test_balance_totals_sum_each_accounts_latest_balance(
 
 
 async def test_positions_merge_by_isin_across_depots(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed(
         {
             "p1": {
@@ -246,8 +262,8 @@ async def test_positions_merge_by_isin_across_depots(
 
 
 async def test_one_depot_on_a_past_day_is_merged_exactly(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed(
         {
             "p1": {
@@ -309,8 +325,8 @@ async def test_one_depot_on_a_past_day_is_merged_exactly(
 
 
 async def test_account_syncs_can_follow_one_account(
-    link, aexecute, fakebank, subscribe
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, subscribe: Subscribe
+) -> None:
     fakebank.scenario(
         [
             account(transactions=[tx("-1.00", "2026-09-01", "A")]),
@@ -343,8 +359,8 @@ async def test_account_syncs_can_follow_one_account(
 
 
 async def test_a_redirect_login_is_watched_until_done(
-    aexecute, fakebank, eb_provider, subscribe
-):
+    aexecute: AExecute, fakebank: FakeBank, eb_provider: str, subscribe: Subscribe
+) -> None:
     fakebank.scenario([account()])
     session = (
         await aexecute(LINK, {"provider": eb_provider, "aspsp": fakebank.aspsp})
@@ -371,8 +387,8 @@ async def test_a_redirect_login_is_watched_until_done(
 
 
 async def test_a_cancelled_login_is_announced(
-    aexecute, fakebank, eb_provider, subscribe
-):
+    aexecute: AExecute, fakebank: FakeBank, eb_provider: str, subscribe: Subscribe
+) -> None:
     fakebank.scenario([account()])
     session = (
         await aexecute(LINK, {"provider": eb_provider, "aspsp": fakebank.aspsp})
@@ -389,8 +405,8 @@ async def test_a_cancelled_login_is_announced(
 
 
 async def test_an_expiring_login_reads_expired_without_an_announcement(
-    aexecute, fakebank, eb_provider, subscribe
-):
+    aexecute: AExecute, fakebank: FakeBank, eb_provider: str, subscribe: Subscribe
+) -> None:
     fakebank.scenario([account()])
     session = (
         await aexecute(LINK, {"provider": eb_provider, "aspsp": fakebank.aspsp})
@@ -408,8 +424,8 @@ async def test_an_expiring_login_reads_expired_without_an_announcement(
 
 
 async def test_only_the_starter_watches_a_login(
-    aexecute, fakebank, eb_provider, subscribe
-):
+    aexecute: AExecute, fakebank: FakeBank, eb_provider: str, subscribe: Subscribe
+) -> None:
     fakebank.scenario([account()])
     session = (
         await aexecute(LINK, {"provider": eb_provider, "aspsp": fakebank.aspsp})

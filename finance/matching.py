@@ -28,7 +28,7 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, TypeVar
+from typing import TypeVar, cast
 
 from django.conf import settings
 from django.db.models import QuerySet
@@ -45,16 +45,30 @@ def window_days() -> int:
     return getattr(settings, "BANK_IMPORTS", {}).get("match_window_days", 3)
 
 
-def _get(row: Any, name: str) -> Any:  # noqa: ANN401 - a dict of model fields or a Transaction
+def _get(row: object, name: str) -> object:
+    """A field of a row: a dict of model fields, an import row or a Transaction."""
     return row.get(name) if isinstance(row, dict) else getattr(row, name)
 
 
-def booking_day(row: Any) -> date | None:  # noqa: ANN401
+def _amount(row: object) -> Decimal:
+    return Decimal(cast("Decimal | str", _get(row, "amount")))
+
+
+def _currency(row: object) -> str:
+    return cast(str, _get(row, "currency"))
+
+
+def _iban(row: object) -> str | None:
+    return normalize_iban(cast("str | None", _get(row, "counterparty_iban")))
+
+
+def booking_day(row: object) -> date | None:
     """The day a row was booked (else took effect, else was made)."""
-    return (
+    return cast(
+        "date | None",
         _get(row, "booking_date")
         or _get(row, "value_date")
-        or _get(row, "transaction_date")
+        or _get(row, "transaction_date"),
     )
 
 
@@ -62,24 +76,22 @@ def pair(
     candidates: Sequence[A],
     pool: Sequence[B],
     window: int | None = None,
-    day: Callable[[Any], date | None] = booking_day,
+    day: Callable[[A | B], date | None] = booking_day,
 ) -> dict[int, B]:
     """Pair ``candidates`` with ``pool`` rows describing the same booking; ``{candidate index: pool row}``."""
     window = window_days() if window is None else window
     by_amount: dict[tuple[Decimal, str], list[tuple[int, B]]] = defaultdict(list)
     for index, row in enumerate(pool):
-        by_amount[(Decimal(_get(row, "amount")), _get(row, "currency"))].append(
-            (index, row)
-        )
+        by_amount[(_amount(row), _currency(row))].append((index, row))
 
     options: list[tuple[int, int, int]] = []
     for c_index, candidate in enumerate(candidates):
         c_day = day(candidate)
         if c_day is None:
             continue
-        c_iban = normalize_iban(_get(candidate, "counterparty_iban"))
+        c_iban = _iban(candidate)
         for p_index, row in by_amount.get(
-            (Decimal(_get(candidate, "amount")), _get(candidate, "currency")), []
+            (_amount(candidate), _currency(candidate)), []
         ):
             p_day = day(row)
             if p_day is None:
@@ -87,7 +99,7 @@ def pair(
             gap = abs((c_day - p_day).days)
             if gap > window:
                 continue
-            p_iban = normalize_iban(_get(row, "counterparty_iban"))
+            p_iban = _iban(row)
             if c_iban and p_iban and c_iban != p_iban:
                 continue
             options.append((gap, c_index, p_index))

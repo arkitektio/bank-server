@@ -11,6 +11,7 @@ user ignored stays ignored; a confirmed one stays confirmed and keeps its dates 
 
 import re
 import statistics
+from collections.abc import Iterable
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -45,7 +46,7 @@ def classify(dates: list[date]) -> int | None:
     """The period the dates recur at, or None if they are not regular."""
     if len(dates) < MIN_OCCURRENCES:
         return None
-    gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
+    gaps = [(b - a).days for a, b in zip(dates, dates[1:], strict=False)]
     if any(gap == 0 for gap in gaps):
         return None
     mean = statistics.mean(gaps)
@@ -126,6 +127,6 @@ def detect_for_account(account: models.BankAccount) -> int:
     return found
 
 
-def detect(accounts) -> int:  # noqa: ANN001 - an iterable of BankAccount
+def detect(accounts: Iterable[models.BankAccount]) -> int:
     """Detect for several accounts."""
     return sum(detect_for_account(account) for account in accounts)

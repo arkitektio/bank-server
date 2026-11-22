@@ -19,7 +19,7 @@ STATE: dict = {"listings": {}, "series": {}, "log": []}
 API_KEY = "test-twelvedata-key"
 
 
-def _log(request: web.Request, **extra) -> None:
+def _log(request: web.Request, **extra: object) -> None:
     STATE["log"].append({"path": request.path, "query": dict(request.query), **extra})
 
 
@@ -109,7 +109,7 @@ async def yahoo_chart(request: web.Request) -> web.Response:
     )
 
 
-def _td(request: web.Request):  # noqa: ANN202
+def _td(request: web.Request) -> tuple[dict | None, web.Response | None]:
     q = request.query
     _log(request)
     if q.get("apikey") != API_KEY:

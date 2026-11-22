@@ -9,9 +9,10 @@ import math
 from collections import defaultdict
 from decimal import Decimal
 
-from django.db.models import Count, F, Max, Min, Sum
+from django.db.models import Count, F, Max, Min, QuerySet, Sum
 from django.db.models.functions import ExtractYear
 from django.utils import timezone
+from kante.types import Info
 
 from finance import budgets as budget_logic
 from finance import enums, geo, models, stats
@@ -85,7 +86,7 @@ def location_insights(
     )
 
 
-def _in_area(qs, area: t.AreaInput):  # noqa: ANN001, ANN202
+def _in_area(qs: QuerySet, area: t.AreaInput) -> QuerySet:
     from kante.errors import ValidationError
 
     if (area.near is None) == (area.within is None):
@@ -270,8 +271,8 @@ def category_insights(
 
 
 def _movers(
-    current, previous, field: str, limit: int
-) -> list[tuple[int | None, t.Change]]:  # noqa: ANN001
+    current: QuerySet, previous: QuerySet | None, field: str, limit: int
+) -> list[tuple[int | None, t.Change]]:
     now = {(r[field], r["currency"]): -r["expense"] for r in c._sums(current, field)}
     before = (
         {(r[field], r["currency"]): -r["expense"] for r in c._sums(previous, field)}
@@ -346,11 +347,11 @@ def period_overview(w: Window, limit: int) -> t.PeriodOverview:
 
 
 def portfolio_insights(
-    info,
+    info: Info,
     accounts: list[models.BankAccount] | None,
     date_from: datetime.date | None,
     as_of: datetime.date | None = None,
-) -> t.PortfolioInsights:  # noqa: ANN001
+) -> t.PortfolioInsights:
     scoped = for_org(models.BankAccount, info)
     chosen = accounts if accounts is not None else list(scoped)
     depots = [a for a in chosen if a.kind == models.AccountKind.DEPOT]

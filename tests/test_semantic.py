@@ -6,9 +6,11 @@ Groceries) meet a never-seen merchant exactly.
 """
 
 import pytest
+from kante.context import HttpContext
+from pytest_django.fixtures import SettingsWrapper
 
 from finance import models
-from tests.conftest import account, tx
+from tests.conftest import AExecute, FakeBank, Link, account, tx
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -17,7 +19,13 @@ TXS = "query($a: ID!) { transactions(filters: {accounts: [$a]}, ordering: [{book
 SUGGEST = "query($t: ID!) { suggestCategories(transaction: $t) { category { key name } score reason neighbours evidence { id } } }"
 
 
-async def _bank(link, aexecute, fakebank, rows, context=None) -> tuple[str, str]:  # noqa: ANN001
+async def _bank(
+    link: Link,
+    aexecute: AExecute,
+    fakebank: FakeBank,
+    rows: list[dict],
+    context: HttpContext | None = None,
+) -> tuple[str, str]:
     ident = f"acct-{fakebank.aspsp.replace(' ', '-')}"
     fakebank.scenario([account(ident, transactions=rows)])
     acc = (await link(context))["accounts"][0]["id"]
@@ -25,14 +33,18 @@ async def _bank(link, aexecute, fakebank, rows, context=None) -> tuple[str, str]
     return acc, ident
 
 
-async def _rows(aexecute, acc, context=None) -> dict[str, dict]:  # noqa: ANN001
+async def _rows(
+    aexecute: AExecute, acc: str, context: HttpContext | None = None
+) -> dict[str, dict]:
     return {
         t["counterparty"]: t
         for t in (await aexecute(TXS, {"a": acc}, context=context)).data["transactions"]
     }
 
 
-async def test_a_known_merchant_term_assigns_on_first_sight(link, aexecute, fakebank):
+async def test_a_known_merchant_term_assigns_on_first_sight(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(
         link, aexecute, fakebank, [tx("-23.40", "2026-09-01", "HOFER DANKT 0815")]
     )
@@ -46,8 +58,8 @@ async def test_a_known_merchant_term_assigns_on_first_sight(link, aexecute, fake
 
 
 async def test_the_organizations_own_choices_outvote_base_terms(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, ident = await _bank(
         link,
         aexecute,
@@ -93,7 +105,9 @@ async def test_the_organizations_own_choices_outvote_base_terms(
     )  # the base term still shows up
 
 
-async def test_a_loose_match_is_only_suggested(link, aexecute, fakebank):
+async def test_a_loose_match_is_only_suggested(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(
         link, aexecute, fakebank, [tx("-9.80", "2026-09-02", "Apotheke zum Hirschen")]
     )
@@ -109,8 +123,8 @@ async def test_a_loose_match_is_only_suggested(link, aexecute, fakebank):
 
 
 async def test_rules_override_semantic_and_nothing_overrides_manual(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(
         link,
         aexecute,
@@ -149,8 +163,8 @@ async def test_rules_override_semantic_and_nothing_overrides_manual(
 
 
 async def test_with_auto_assign_off_it_only_suggests(
-    link, aexecute, fakebank, settings
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, settings: SettingsWrapper
+) -> None:
     settings.CATEGORIZATION = {**settings.CATEGORIZATION, "auto_assign": False}
     acc, _ = await _bank(
         link, aexecute, fakebank, [tx("-23.40", "2026-09-01", "HOFER DANKT 0815")]
@@ -164,8 +178,8 @@ async def test_with_auto_assign_off_it_only_suggests(
 
 
 async def test_with_embeddings_disabled_everything_still_works_lexically(
-    link, aexecute, fakebank, settings
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, settings: SettingsWrapper
+) -> None:
     settings.EMBEDDINGS = {**settings.EMBEDDINGS, "ENABLED": False}
     acc, _ = await _bank(
         link, aexecute, fakebank, [tx("-23.40", "2026-09-01", "HOFER DANKT 0815")]
@@ -186,7 +200,9 @@ async def test_with_embeddings_disabled_everything_still_works_lexically(
     assert lexical == [{"counterparty": "HOFER DANKT 0815"}] and semantic == []
 
 
-async def test_search_finds_by_meaning_through_categories(link, aexecute, fakebank):
+async def test_search_finds_by_meaning_through_categories(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _bank(
         link,
         aexecute,
@@ -213,8 +229,8 @@ async def test_search_finds_by_meaning_through_categories(link, aexecute, fakeba
 
 
 async def test_similar_and_near_category_stay_in_the_organization(
-    link, aexecute, fakebank, other_org_context
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank, other_org_context: HttpContext
+) -> None:
     rows = [
         tx("-12.00", "2026-09-01", "BILLA DANKT 0421"),
         tx("-30.00", "2026-09-03", "BILLA FILIALE 1180"),
@@ -272,7 +288,9 @@ async def test_similar_and_near_category_stay_in_the_organization(
     }
 
 
-async def test_candidates_and_reapply_recompute_guesses(link, aexecute, fakebank):
+async def test_candidates_and_reapply_recompute_guesses(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(
         link,
         aexecute,
@@ -307,8 +325,8 @@ async def test_candidates_and_reapply_recompute_guesses(link, aexecute, fakebank
 
 
 async def test_a_merchant_query_stays_exact_while_a_concept_widens(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _bank(
         link,
         aexecute,
@@ -339,7 +357,9 @@ async def test_a_merchant_query_stays_exact_while_a_concept_widens(
     }
 
 
-async def test_the_inbox_list_shape_resolves_suggestions(link, aexecute, fakebank):
+async def test_the_inbox_list_shape_resolves_suggestions(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     await _bank(
         link,
         aexecute,
@@ -367,8 +387,8 @@ async def test_the_inbox_list_shape_resolves_suggestions(link, aexecute, fakeban
 
 
 async def test_a_list_asks_suggestions_only_for_unsettled_rows(
-    link, aexecute, fakebank
-):
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
     acc, _ = await _bank(
         link,
         aexecute,

@@ -167,7 +167,7 @@ class ScalableClient:
             return status, body
         raise AssertionError("unreachable")
 
-    def _oauth_error(self, action: str, status: int, body: Any) -> ScalableError:
+    def _oauth_error(self, action: str, status: int, body: object) -> ScalableError:
         error = (
             body.get("error", "unknown_error")
             if isinstance(body, dict)

@@ -8,6 +8,8 @@ import datetime
 
 import strawberry
 import strawberry_django
+from django.db.models import QuerySet
+from django.utils import timezone
 from kante.types import Info
 
 from finance import budgets as budget_logic
@@ -28,7 +30,13 @@ __all__ = [
 ]
 
 
-def _scoped_window(info: Info, date_from, date_to, accounts, include_transfers: bool):  # noqa: ANN001, ANN202
+def _scoped_window(
+    info: Info,
+    date_from: datetime.date | None,
+    date_to: datetime.date | None,
+    accounts: list[strawberry.ID] | None,
+    include_transfers: bool,
+) -> QuerySet:
     account_ids = (
         [a.id for a in get_many(models.BankAccount, info, accounts)]
         if accounts
@@ -133,7 +141,7 @@ def balance_history(
     """The account's end-of-day balance for every day in the range (up to today by default)."""
     bank_account = get_or_404(models.BankAccount, info, account)
     points = stats.balance_history(
-        bank_account, date_from, date_to or datetime.date.today()
+        bank_account, date_from, date_to or timezone.localdate()
     )
     return [
         types.BalancePoint(
@@ -149,7 +157,7 @@ def budget_status(
     category: strawberry.ID | None = None,
 ) -> list[types.BudgetStatus]:
     """Budgeted vs. spent for every budget active in a month (the current one by default); `category`: only that category's budgets."""
-    month = month or datetime.date.today()
+    month = month or timezone.localdate()
     budgets = for_org(models.Budget, info)
     if category is not None:
         budgets = budgets.filter(category_id=category)

@@ -8,6 +8,8 @@ import datetime
 from importlib import import_module
 
 import pytest
+from django.utils import timezone
+from kante.context import HttpContext
 
 from finance import crypto, models
 from finance.scheduled import sync_all_accounts
@@ -15,8 +17,18 @@ from tests.conftest import (
     COMPLETE,
     LINK,
     REDIRECTS,
+    AExecute,
+    Application,
+    FakeBank,
+    FakeMarket,
+    FakeScalable,
+    Link,
+    ProviderFor,
+    Stack,
     account,
     connection_of,
+    error_of,
+    extensions_of,
     holding,
     register_application,
     tx,
@@ -33,7 +45,7 @@ DELETE = "mutation($id: ID!) { deleteProvider(id: $id) }"
 SYNC = "mutation($id: ID!) { syncAccount(id: $id) { created balances holdings } }"
 
 
-def _eb(application, **fields) -> dict:
+def _eb(application: Application, **fields: object) -> dict:
     return {
         "input": {
             "name": "Our application",
@@ -44,14 +56,14 @@ def _eb(application, **fields) -> dict:
     }
 
 
-async def _set(provider_id: str, **fields) -> None:
+async def _set(provider_id: str, **fields: object) -> None:
     await models.BankProvider.objects.filter(id=provider_id).aupdate(**fields)
 
 
 # --- what the server can run -------------------------------------------------------------------
 
 
-async def test_the_kinds_list_their_capabilities(aexecute):
+async def test_the_kinds_list_their_capabilities(aexecute: AExecute) -> None:
     kinds = (
         await aexecute(
             "{ providerKinds { kind label finish hasInstitutions defaultDailySyncLimit capabilities { capability label description } } }"
@@ -91,8 +103,11 @@ async def test_the_kinds_list_their_capabilities(aexecute):
 
 
 async def test_an_admin_sets_up_an_application_with_its_pem_and_links_through_it(
-    aexecute, admin_context, application, fakebank
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    application: Application,
+    fakebank: FakeBank,
+) -> None:
     fakebank.scenario(
         [account(transactions=[tx("-5.00", "2026-09-01", "Shop")], balance="10.00")]
     )
@@ -136,8 +151,8 @@ async def test_an_admin_sets_up_an_application_with_its_pem_and_links_through_it
 
 
 async def test_the_key_is_stored_encrypted_and_never_leaves(
-    aexecute, admin_context, application
-):
+    aexecute: AExecute, admin_context: HttpContext, application: Application
+) -> None:
     created = (await aexecute(CREATE_EB, _eb(application), context=admin_context)).data[
         "createEnableBankingProvider"
     ]
@@ -182,22 +197,29 @@ async def test_the_key_is_stored_encrypted_and_never_leaves(
     ],
 )
 async def test_what_enable_banking_would_not_accept_is_refused_and_nothing_is_stored(
-    aexecute, admin_context, application, fields, message
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    application: Application,
+    fields: dict[str, object],
+    message: str,
+) -> None:
     result = await aexecute(
         CREATE_EB, _eb(application, **fields), context=admin_context, allow_errors=True
     )
 
     assert (
-        result.errors[0].extensions["code"] == "VALIDATION_ERROR"
-        and message in result.errors[0].message
+        extensions_of(result)["code"] == "VALIDATION_ERROR"
+        and message in error_of(result).message
     )
     assert not await models.BankProvider.objects.aexists()
 
 
 async def test_a_key_that_is_not_the_applications_is_refused(
-    aexecute, admin_context, application, backend_stack
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    application: Application,
+    backend_stack: Stack,
+) -> None:
     other = register_application(backend_stack.fakebank_url, "another-app")
 
     result = await aexecute(
@@ -207,13 +229,17 @@ async def test_a_key_that_is_not_the_applications_is_refused(
         allow_errors=True,
     )
 
-    assert result.errors[0].extensions["code"] == "VALIDATION_ERROR"
+    assert extensions_of(result)["code"] == "VALIDATION_ERROR"
     assert not await models.BankProvider.objects.aexists()
 
 
 async def test_only_an_admin_of_the_organization_sets_providers_up(
-    aexecute, admin_context, colleague_context, other_org_context, application
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    colleague_context: HttpContext,
+    other_org_context: HttpContext,
+    application: Application,
+) -> None:
     by_member = await aexecute(CREATE_EB, _eb(application), allow_errors=True)
     scalable_by_member = await aexecute(
         CREATE_SC, {"input": {}}, context=colleague_context, allow_errors=True
@@ -239,16 +265,19 @@ async def test_only_an_admin_of_the_organization_sets_providers_up(
     )
 
     for refused in (by_member, scalable_by_member, update_by_member, delete_by_member):
-        assert refused.errors[0].extensions["code"] == "PERMISSION_DENIED"
+        assert extensions_of(refused)["code"] == "PERMISSION_DENIED"
     assert seen_by_member == [
         {"id": created["id"], "name": "Our application"}
     ]  # members see it: they link through it
-    assert seen_elsewhere == [] and foreign.errors[0].extensions["code"] == "NOT_FOUND"
+    assert seen_elsewhere == [] and extensions_of(foreign)["code"] == "NOT_FOUND"
 
 
 async def test_a_provider_of_another_organization_links_nothing(
-    aexecute, other_org_context, eb_provider, fakebank
-):
+    aexecute: AExecute,
+    other_org_context: HttpContext,
+    eb_provider: str,
+    fakebank: FakeBank,
+) -> None:
     fakebank.scenario([account()])
 
     result = await aexecute(
@@ -258,12 +287,12 @@ async def test_a_provider_of_another_organization_links_nothing(
         allow_errors=True,
     )
 
-    assert result.errors[0].extensions["code"] == "NOT_FOUND"
+    assert extensions_of(result)["code"] == "NOT_FOUND"
 
 
 async def test_names_are_unique_in_the_organization(
-    aexecute, admin_context, application
-):
+    aexecute: AExecute, admin_context: HttpContext, application: Application
+) -> None:
     await aexecute(CREATE_EB, _eb(application), context=admin_context)
 
     again = await aexecute(
@@ -274,8 +303,8 @@ async def test_names_are_unique_in_the_organization(
     )
 
     assert (
-        again.errors[0].extensions["code"] == "VALIDATION_ERROR"
-        and "already has a provider named" in again.errors[0].message
+        extensions_of(again)["code"] == "VALIDATION_ERROR"
+        and "already has a provider named" in error_of(again).message
     )
 
 
@@ -283,8 +312,8 @@ async def test_names_are_unique_in_the_organization(
 
 
 async def test_an_update_without_a_key_keeps_the_stored_one(
-    aexecute, admin_context, application
-):
+    aexecute: AExecute, admin_context: HttpContext, application: Application
+) -> None:
     created = (await aexecute(CREATE_EB, _eb(application), context=admin_context)).data[
         "createEnableBankingProvider"
     ]
@@ -319,8 +348,11 @@ async def test_an_update_without_a_key_keeps_the_stored_one(
 
 
 async def test_a_new_key_is_proven_before_it_replaces_the_old_one(
-    aexecute, admin_context, application, backend_stack
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    application: Application,
+    backend_stack: Stack,
+) -> None:
     created = (await aexecute(CREATE_EB, _eb(application), context=admin_context)).data[
         "createEnableBankingProvider"
     ]
@@ -347,7 +379,7 @@ async def test_a_new_key_is_proven_before_it_replaces_the_old_one(
         )
     ).data["updateEnableBankingProvider"]
 
-    assert wrong.errors[0].extensions["code"] == "VALIDATION_ERROR"
+    assert extensions_of(wrong)["code"] == "VALIDATION_ERROR"
     assert crypto.decrypt(after_wrong.secret) == application.pem.strip()
     assert (
         right["enableBanking"]["appId"] == "test-app-rotated"
@@ -357,8 +389,11 @@ async def test_a_new_key_is_proven_before_it_replaces_the_old_one(
 
 
 async def test_a_provider_whose_key_enable_banking_no_longer_accepts_can_still_be_disabled(
-    aexecute, admin_context, backend_stack, fakebank
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    backend_stack: Stack,
+    fakebank: FakeBank,
+) -> None:
     """The kill switch: the form sends every field back unchanged, and none of that may ask Enable Banking."""
     revoked = register_application(backend_stack.fakebank_url, "revoked-app")
     created = (await aexecute(CREATE_EB, _eb(revoked), context=admin_context)).data[
@@ -399,13 +434,17 @@ async def test_a_provider_whose_key_enable_banking_no_longer_accepts_can_still_b
     assert (disabled["name"], disabled["enabled"]) == ("Revoked", False)
     assert fakebank.log()[seen:] == []
     assert (
-        new_redirect.errors[0].extensions["code"] == "VALIDATION_ERROR"
+        extensions_of(new_redirect)["code"] == "VALIDATION_ERROR"
     )  # that does need Enable Banking, which refuses the old key
 
 
 async def test_two_applications_in_one_organization_each_sign_as_themselves(
-    aexecute, admin_context, application, backend_stack, fakebank
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    application: Application,
+    backend_stack: Stack,
+    fakebank: FakeBank,
+) -> None:
     second = register_application(backend_stack.fakebank_url, "second-app")
     fakebank.scenario([account(transactions=[tx("-1.00", "2026-09-01", "Shop")])])
     first_id = (
@@ -461,8 +500,12 @@ async def test_two_applications_in_one_organization_each_sign_as_themselves(
 
 
 async def test_a_capability_switched_off_is_not_fetched_or_stored(
-    aexecute, admin_context, link, eb_provider, fakebank
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    link: Link,
+    eb_provider: str,
+    fakebank: FakeBank,
+) -> None:
     fakebank.scenario(
         [account(transactions=[tx("-5.00", "2026-09-01", "Shop")], balance="10.00")]
     )
@@ -487,8 +530,8 @@ async def test_a_capability_switched_off_is_not_fetched_or_stored(
 
 
 async def test_transactions_switched_off_leaves_the_stored_ones_alone(
-    aexecute, link, eb_provider, fakebank
-):
+    aexecute: AExecute, link: Link, eb_provider: str, fakebank: FakeBank
+) -> None:
     ident = "acc-keeps-rows"
     fakebank.scenario(
         [
@@ -515,8 +558,8 @@ async def test_transactions_switched_off_leaves_the_stored_ones_alone(
 
 
 async def test_a_provider_with_nothing_to_sync_says_so_without_asking_the_bank(
-    aexecute, link, eb_provider, fakebank
-):
+    aexecute: AExecute, link: Link, eb_provider: str, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account()])
     account_id = (await link())["accounts"][0]["id"]
     await _set(eb_provider, capabilities=["SCHEDULED_SYNC"])
@@ -524,13 +567,13 @@ async def test_a_provider_with_nothing_to_sync_says_so_without_asking_the_bank(
 
     result = await aexecute(SYNC, {"id": account_id}, allow_errors=True)
 
-    assert result.errors[0].extensions["code"] == "NOT_CONFIGURED"
+    assert extensions_of(result)["code"] == "NOT_CONFIGURED"
     assert fakebank.log()[seen:] == []
 
 
 async def test_an_unsupported_capability_is_refused(
-    aexecute, admin_context, eb_provider
-):
+    aexecute: AExecute, admin_context: HttpContext, eb_provider: str
+) -> None:
     result = await aexecute(
         UPDATE,
         {"input": {"id": eb_provider, "capabilities": ["TRANSACTIONS", "PRICES"]}},
@@ -539,14 +582,14 @@ async def test_an_unsupported_capability_is_refused(
     )
 
     assert (
-        result.errors[0].extensions["code"] == "VALIDATION_ERROR"
-        and "cannot do PRICES" in result.errors[0].message
+        extensions_of(result)["code"] == "VALIDATION_ERROR"
+        and "cannot do PRICES" in error_of(result).message
     )
 
 
 async def test_the_unattended_sync_only_runs_providers_that_allow_it(
-    aexecute, link, eb_provider, fakebank
-):
+    aexecute: AExecute, link: Link, eb_provider: str, fakebank: FakeBank
+) -> None:
     fakebank.scenario([account(transactions=[tx("-5.00", "2026-09-01", "Shop")])])
     account_id = (await link())["accounts"][0]["id"]
     await _set(eb_provider, capabilities=["TRANSACTIONS", "BALANCES"])
@@ -562,8 +605,12 @@ async def test_the_unattended_sync_only_runs_providers_that_allow_it(
 
 
 async def test_scalable_holdings_and_prices_follow_their_capabilities(
-    aexecute, scalable_link, provider_for, fakescalable, fakemarket
-):
+    aexecute: AExecute,
+    scalable_link: Link,
+    provider_for: ProviderFor,
+    fakescalable: FakeScalable,
+    fakemarket: FakeMarket,
+) -> None:
     fakescalable.seed(
         {
             "p1": {
@@ -574,7 +621,7 @@ async def test_scalable_holdings_and_prices_follow_their_capabilities(
         }
     )
     # Within the 31 days a sync refreshes: fixed dates expire as the calendar moves on.
-    today = datetime.date.today()
+    today = timezone.localdate()
     fakescalable.prices(
         {
             "IE00SCAL0001": [
@@ -612,8 +659,12 @@ async def test_scalable_holdings_and_prices_follow_their_capabilities(
 
 
 async def test_a_disabled_provider_links_and_syncs_nothing_but_still_revokes(
-    aexecute, admin_context, link, eb_provider, fakebank
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    link: Link,
+    eb_provider: str,
+    fakebank: FakeBank,
+) -> None:
     fakebank.scenario([account()])
     linked = await link()
     await aexecute(
@@ -634,9 +685,7 @@ async def test_a_disabled_provider_links_and_syncs_nothing_but_still_revokes(
     ).data["revokeBankConnection"]
 
     assert (
-        start.errors[0].extensions["code"]
-        == sync.errors[0].extensions["code"]
-        == "NOT_CONFIGURED"
+        extensions_of(start)["code"] == extensions_of(sync)["code"] == "NOT_CONFIGURED"
     )
     assert silent == []
     assert revoked == {"status": "REVOKED", "lastError": None}
@@ -644,8 +693,12 @@ async def test_a_disabled_provider_links_and_syncs_nothing_but_still_revokes(
 
 
 async def test_a_provider_in_use_is_not_deleted_and_a_deleted_one_leaves_the_data(
-    aexecute, admin_context, link, eb_provider, fakebank
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    link: Link,
+    eb_provider: str,
+    fakebank: FakeBank,
+) -> None:
     fakebank.scenario([account(transactions=[tx("-5.00", "2026-09-01", "Shop")])])
     linked = await link()
     await aexecute(SYNC, {"id": linked["accounts"][0]["id"]})
@@ -668,8 +721,8 @@ async def test_a_provider_in_use_is_not_deleted_and_a_deleted_one_leaves_the_dat
     ).data["bankConnection"]
 
     assert (
-        in_use.errors[0].extensions["code"] == "VALIDATION_ERROR"
-        and "revoke them first" in in_use.errors[0].message
+        extensions_of(in_use)["code"] == "VALIDATION_ERROR"
+        and "revoke them first" in error_of(in_use).message
     )
     assert deleted == eb_provider
     assert left == {
@@ -684,8 +737,13 @@ async def test_a_provider_in_use_is_not_deleted_and_a_deleted_one_leaves_the_dat
 
 
 async def test_consents_without_a_provider_wait_for_the_organizations_first_one(
-    aexecute, admin_context, link, eb_provider, application, fakebank
-):
+    aexecute: AExecute,
+    admin_context: HttpContext,
+    link: Link,
+    eb_provider: str,
+    application: Application,
+    fakebank: FakeBank,
+) -> None:
     """What an update leaves behind: an ACTIVE Enable Banking consent attached to nothing."""
     fakebank.scenario([account(transactions=[tx("-5.00", "2026-09-01", "Shop")])])
     linked = await link()
@@ -701,7 +759,7 @@ async def test_consents_without_a_provider_wait_for_the_organizations_first_one(
         "syncAccount"
     ]
 
-    assert orphaned.errors[0].extensions["code"] == "NOT_CONFIGURED"
+    assert extensions_of(orphaned)["code"] == "NOT_CONFIGURED"
     assert (
         await models.BankConnection.objects.aget(id=linked["id"])
     ).bank_provider_id == int(created["id"])

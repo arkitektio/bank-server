@@ -3,6 +3,7 @@
 import datetime
 
 from channels.db import database_sync_to_async
+from django.utils import timezone
 from kante.types import Info
 
 from finance import enums, models
@@ -67,7 +68,7 @@ async def refresh_security_prices(
     sources: list[enums.PriceSource] | None = None,
 ) -> list[t.PriceRefresh]:
     """Fetch daily closes (the held ISINs and the last year by default) from every enabled source and store them."""
-    end = date_to or datetime.date.today()
+    end = date_to or timezone.localdate()
     start = date_from or end - datetime.timedelta(days=365)
     try:
         outcomes = await service.refresh(

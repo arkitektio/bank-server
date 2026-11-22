@@ -10,6 +10,7 @@ import threading
 import time
 
 import pytest
+from kante.context import HttpContext
 
 from finance import models
 from finance.scalable.client import ScalableClient
@@ -19,8 +20,12 @@ from finance.scalable.tokens import session_for
 from tests.conftest import (
     SCALABLE_COMPLETE,
     SCALABLE_START,
+    AExecute,
+    FakeScalable,
+    Link,
     cash,
     connection_of,
+    extensions_of,
     holding,
     trade,
 )
@@ -41,7 +46,7 @@ query H($acc: ID!) { bankAccount(id: $acc) { holdingsCount currentHoldings { isi
 """
 
 
-def portfolio(**overrides) -> dict:
+def portfolio(**overrides: object) -> dict:
     data = {
         "cash": 1234.56,
         "holdings": [
@@ -70,8 +75,8 @@ def by_kind(accounts: list[dict]) -> dict[str, dict]:
 
 
 async def test_link_creates_cash_depot_and_savings_accounts(
-    scalable_link, fakescalable
-):
+    scalable_link: Link, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed(
         {"p1": portfolio()}, savings={"s1": {"total": 500, "name": "Tagesgeld"}}
     )
@@ -97,8 +102,8 @@ async def test_link_creates_cash_depot_and_savings_accounts(
 
 
 async def test_sync_stores_transactions_balances_and_holdings(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     savings_tx = [cash(1.5, "2026-09-01T00:00:00.000Z", "INTEREST")]
     fakescalable.seed(
         {"p1": portfolio()}, savings={"s1": {"total": 500, "transactions": savings_tx}}
@@ -152,8 +157,8 @@ async def test_sync_stores_transactions_balances_and_holdings(
 
 
 async def test_resync_is_idempotent_and_pending_order_updates_in_place(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     order = trade(
         -250, "2026-09-24T09:00:00.000Z", "IE00TEST0002", status="PENDING", id="order-1"
     )
@@ -195,8 +200,8 @@ async def test_resync_is_idempotent_and_pending_order_updates_in_place(
 
 
 async def test_holdings_of_the_day_are_replaced_on_resync(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed({"p1": portfolio()})
     depot = by_kind((await scalable_link())["accounts"])["DEPOT"]["id"]
     await aexecute(SYNC_ACCOUNT, {"id": depot})
@@ -216,8 +221,8 @@ async def test_holdings_of_the_day_are_replaced_on_resync(
 
 
 async def test_trades_and_deposits_stay_out_of_spending(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed(
         {
             "p1": portfolio(
@@ -247,8 +252,8 @@ async def test_trades_and_deposits_stay_out_of_spending(
 
 
 async def test_link_waits_for_the_device_code_and_respects_the_interval(
-    aexecute, fakescalable, sc_provider
-):
+    aexecute: AExecute, fakescalable: FakeScalable, sc_provider: str
+) -> None:
     fakescalable.seed({"p1": portfolio()})
     fakescalable.config(interval=1)
     started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data[
@@ -285,7 +290,9 @@ async def test_link_waits_for_the_device_code_and_respects_the_interval(
     assert done["result"]["label"] == "Scalable Capital"
 
 
-async def test_link_with_second_factor(aexecute, fakescalable, sc_provider):
+async def test_link_with_second_factor(
+    aexecute: AExecute, fakescalable: FakeScalable, sc_provider: str
+) -> None:
     fakescalable.seed({"p1": portfolio()}, mfa=True)
     started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data[
         "startLink"
@@ -308,7 +315,9 @@ async def test_link_with_second_factor(aexecute, fakescalable, sc_provider):
     assert done["status"] == "DONE" and done["step"] is None
 
 
-async def test_denied_second_factor_fails_the_link(aexecute, fakescalable, sc_provider):
+async def test_denied_second_factor_fails_the_link(
+    aexecute: AExecute, fakescalable: FakeScalable, sc_provider: str
+) -> None:
     fakescalable.seed({"p1": portfolio()}, mfa=True)
     started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data[
         "startLink"
@@ -332,7 +341,9 @@ async def test_denied_second_factor_fails_the_link(aexecute, fakescalable, sc_pr
     )
 
 
-async def test_denied_login_code_fails_the_link(aexecute, fakescalable, sc_provider):
+async def test_denied_login_code_fails_the_link(
+    aexecute: AExecute, fakescalable: FakeScalable, sc_provider: str
+) -> None:
     started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data[
         "startLink"
     ]
@@ -346,8 +357,11 @@ async def test_denied_login_code_fails_the_link(aexecute, fakescalable, sc_provi
 
 
 async def test_another_organization_cannot_advance_the_link(
-    aexecute, fakescalable, other_org_context, sc_provider
-):
+    aexecute: AExecute,
+    fakescalable: FakeScalable,
+    other_org_context: HttpContext,
+    sc_provider: str,
+) -> None:
     fakescalable.seed({"p1": portfolio()})
     started = (await aexecute(SCALABLE_START, {"provider": sc_provider})).data[
         "startLink"
@@ -361,15 +375,15 @@ async def test_another_organization_cannot_advance_the_link(
         allow_errors=True,
     )
 
-    assert result.errors[0].extensions["code"] == "INVALID_STATE"
+    assert extensions_of(result)["code"] == "INVALID_STATE"
     assert (
         await models.BankConnection.objects.aget(state=started["state"])
     ).status == models.ConnectionStatus.PENDING
 
 
 async def test_short_lived_tokens_are_refreshed_and_rotated(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed({"p1": portfolio()})
     fakescalable.config(
         token_ttl=30
@@ -383,8 +397,8 @@ async def test_short_lived_tokens_are_refreshed_and_rotated(
 
 
 async def test_revoked_login_expires_the_connection_and_relink_keeps_history(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed({"p1": portfolio()})
     fakescalable.config(token_ttl=30)
     first = await scalable_link()
@@ -396,15 +410,15 @@ async def test_revoked_login_expires_the_connection_and_relink_keeps_history(
     connection = await models.BankConnection.objects.aget(id=first["id"])
     second = await scalable_link()
 
-    assert failed.errors[0].extensions["code"] == "CONSENT_EXPIRED"
+    assert extensions_of(failed)["code"] == "CONSENT_EXPIRED"
     assert connection.status == models.ConnectionStatus.EXPIRED
     assert by_kind(second["accounts"])["CASH"]["id"] == cash_id
     assert len((await aexecute(TXS, {"acc": cash_id})).data["transactions"]) == 3
 
 
 async def test_revoking_logs_out_at_scalable_and_forgets_credentials(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed({"p1": portfolio()})
     connection = await scalable_link()
 
@@ -423,8 +437,8 @@ async def test_revoking_logs_out_at_scalable_and_forgets_credentials(
 
 
 async def test_only_allowed_operations_ever_reach_scalable(
-    aexecute, fakescalable, sc_provider
-):
+    aexecute: AExecute, fakescalable: FakeScalable, sc_provider: str
+) -> None:
     fakescalable.seed({"p1": portfolio()}, savings={"s1": {"total": 1}}, mfa=True)
     fakescalable.mfa("SUCCESS")
     seen = len(fakescalable.log())
@@ -449,8 +463,8 @@ async def test_only_allowed_operations_ever_reach_scalable(
 
 
 async def test_graphql_nonce_challenge_is_answered(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed({"p1": portfolio()})
     cash_id = by_kind((await scalable_link())["accounts"])["CASH"]["id"]
     fakescalable.config(graphql_nonce_challenges=1)
@@ -465,8 +479,8 @@ async def test_graphql_nonce_challenge_is_answered(
 
 
 async def test_a_rejected_access_token_is_refreshed_not_relinked(
-    scalable_link, aexecute, fakescalable
-):
+    scalable_link: Link, aexecute: AExecute, fakescalable: FakeScalable
+) -> None:
     fakescalable.seed({"p1": portfolio()})
     connection = await scalable_link()
     cash_id = by_kind(connection["accounts"])["CASH"]["id"]
@@ -486,8 +500,8 @@ async def test_a_rejected_access_token_is_refreshed_not_relinked(
 
 
 def test_concurrent_refreshes_rotate_the_token_once(
-    transactional_db, fakescalable, scalable_link
-):
+    transactional_db: None, fakescalable: FakeScalable, scalable_link: Link
+) -> None:
     """Two replicas find the token expiring at once: one refreshes, the other waits and reuses it.
 
     Real threads with their own event loops and DB connections; the first refresh is parked in
