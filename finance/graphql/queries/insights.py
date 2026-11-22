@@ -5,7 +5,7 @@ NOT_FOUND), narrows the organization's transactions to the window, and computes 
 """
 
 import datetime
-from typing import Optional
+from typing import Annotated, Optional
 
 import strawberry
 from kante.types import Info
@@ -51,9 +51,7 @@ def spending_grid(info: Info, within: BoundsInput, cell_meters: float = 500.0, w
     return views.spending_grid(within, cell_meters, resolve_window(info, window))
 
 
-def category_insights(
-    info: Info, category: strawberry.ID, window: Optional[t.StatsWindowInput] = None, compare_to: enums.Comparison = enums.Comparison.PREVIOUS_PERIOD, include_children: bool = True
-) -> t.CategoryInsights:
+def category_insights(info: Info, category: strawberry.ID, window: Optional[t.StatsWindowInput] = None, compare_to: enums.Comparison = enums.Comparison.PREVIOUS_PERIOD, include_children: bool = True) -> t.CategoryInsights:
     """One category (children rolled up): totals, trend, monthly average, share of spending, children, top merchants and counterparties, budgets."""
     return views.category_insights(get_or_404(models.Category, info, category), resolve_window(info, window, compare_to), include_children)
 
@@ -63,10 +61,15 @@ def period_overview(info: Info, window: Optional[t.StatsWindowInput] = None, com
     return views.period_overview(resolve_window(info, window, compare_to), limit)
 
 
-def portfolio_insights(info: Info, accounts: Optional[list[strawberry.ID]] = None, date_from: Optional[datetime.date] = None) -> t.PortfolioInsights:
+def portfolio_insights(
+    info: Info,
+    accounts: Optional[list[strawberry.ID]] = None,
+    date_from: Optional[datetime.date] = None,
+    as_of: Annotated[Optional[datetime.date], strawberry.argument(description="Answer as of this day: each depot's positions of its latest synced day on or before it, history and income up to it. Today by default.")] = None,
+) -> t.PortfolioInsights:
     """The depot (all accounts, or these): value vs. money put in over time, allocation, positions, cost basis, investment income per year."""
     chosen = get_many(models.BankAccount, info, accounts) if accounts else None
-    return views.portfolio_insights(info, chosen, date_from)
+    return views.portfolio_insights(info, chosen, date_from, as_of)
 
 
 def recurring_insights(info: Info, include_detected: bool = False) -> t.RecurringInsights:

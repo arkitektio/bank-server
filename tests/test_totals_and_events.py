@@ -80,11 +80,15 @@ async def test_balance_totals_sum_each_accounts_latest_balance(link, aexecute, f
 
 
 async def test_positions_merge_by_isin_across_depots(scalable_link, aexecute, fakescalable):
-    fakescalable.seed({"p1": {
-        "cash": 100,
-        "holdings": [holding("IE00TEST0001", 10, 100.0, 80.0), holding("US00TEST0002", 5, 20.0, 25.0, kind="STOCK")],
-        "transactions": [trade(-800, "2026-09-10T10:00:00.000Z", "IE00TEST0001", quantity=10), cash(1000, "2026-09-02T00:00:00.000Z", "DEPOSIT")],
-    }})
+    fakescalable.seed(
+        {
+            "p1": {
+                "cash": 100,
+                "holdings": [holding("IE00TEST0001", 10, 100.0, 80.0), holding("US00TEST0002", 5, 20.0, 25.0, kind="STOCK")],
+                "transactions": [trade(-800, "2026-09-10T10:00:00.000Z", "IE00TEST0001", quantity=10), cash(1000, "2026-09-02T00:00:00.000Z", "DEPOSIT")],
+            }
+        }
+    )
     connection = await scalable_link()
     await aexecute("mutation($id: ID!) { syncConnection(id: $id) { created } }", {"id": connection["id"]})
     depot = await models.BankAccount.objects.aget(organization__identifier="static_issuer#static_org", kind=models.AccountKind.DEPOT)
@@ -102,6 +106,28 @@ async def test_positions_merge_by_isin_across_depots(scalable_link, aexecute, fa
         {"isin": "DE000NOFIFO1", "quantity": "2.00000000", "valuation": "200.00", "costBasis": None, "fifoPrice": None, "unrealizedGain": None, "weight": 0.1111, "depots": 1},
         {"isin": "US00TEST0002", "quantity": "5.00000000", "valuation": "100.00", "costBasis": "125.00", "fifoPrice": "25.000000", "unrealizedGain": "-25.00", "weight": 0.0556, "depots": 1},
     ]
+
+
+async def test_one_depot_on_a_past_day_is_merged_exactly(scalable_link, aexecute, fakescalable):
+    fakescalable.seed({"p1": {"cash": 100, "holdings": [holding("IE00TEST0001", 10, 100.0, 80.0)], "transactions": []}})
+    connection = await scalable_link()
+    await aexecute("mutation($id: ID!) { syncConnection(id: $id) { created } }", {"id": connection["id"]})
+    depot = await models.BankAccount.objects.aget(organization__identifier="static_issuer#static_org", kind=models.AccountKind.DEPOT)
+    today = (await models.HoldingSnapshot.objects.filter(account=depot).alatest("date")).date
+    past = today - timedelta(days=10)
+    # Ten days earlier it held two securities (cents that drift as floats, not as decimals).
+    for isin, valuation in (("IE00TEST0001", "0.10"), ("US00TEST0002", "0.20")):
+        await models.HoldingSnapshot.objects.acreate(account=depot, date=past, isin=isin, name=isin, security_type="ETF", quantity=Decimal(1), fifo_price=Decimal("0.05"), price=Decimal(valuation), valuation=Decimal(valuation), currency="EUR")
+
+    query = "query($a: [ID!], $d: Date) { portfolioInsights(accounts: $a, asOf: $d) { mergedPositions { isin quantity valuation costBasis depots } valuation { currency amount } } }"
+    # A day between the two snapshots answers with the older one; today's with today's.
+    then = (await aexecute(query, {"a": [str(depot.id)], "d": (past + timedelta(days=2)).isoformat()})).data["portfolioInsights"]
+    assert [(p["isin"], p["valuation"], p["costBasis"]) for p in then["mergedPositions"]] == [("US00TEST0002", "0.20", "0.05"), ("IE00TEST0001", "0.10", "0.05")]
+    assert then["valuation"] == [{"currency": "EUR", "amount": "0.30"}]
+    now = (await aexecute(query, {"a": [str(depot.id)], "d": today.isoformat()})).data["portfolioInsights"]
+    assert now["mergedPositions"][0]["valuation"] == "1000.00"
+    # Before the depot's first synced day there is nothing to show.
+    assert (await aexecute(query, {"a": [str(depot.id)], "d": (past - timedelta(days=1)).isoformat()})).data["portfolioInsights"]["mergedPositions"] == []
 
 
 async def test_account_syncs_can_follow_one_account(link, aexecute, fakebank, subscribe):

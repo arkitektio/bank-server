@@ -147,10 +147,7 @@ def category_insights(category: models.Category, w: Window, include_children: bo
     previous = w.previous_qs.filter(category_id__in=ids) if w.previous_qs is not None else None
     totals, before = c.totals(qs), c.totals(previous)
     months = max(1, round(w.months))
-    average = [
-        t.MoneyTotals(currency=x.currency, income=(x.income / months).quantize(c.CENT), expense=(x.expense / months).quantize(c.CENT), net=(x.net / months).quantize(c.CENT), count=months)
-        for x in totals
-    ]
+    average = [t.MoneyTotals(currency=x.currency, income=(x.income / months).quantize(c.CENT), expense=(x.expense / months).quantize(c.CENT), net=(x.net / months).quantize(c.CENT), count=months) for x in totals]
     children = []
     for child in category.children.order_by("name"):
         child_qs = w.qs.filter(category_id__in=tree.get(child.id, {child.id}))
@@ -158,9 +155,7 @@ def category_insights(category: models.Category, w: Window, include_children: bo
         for x in c.totals(child_qs):
             children.append(t.RankedCategory(category=child, currency=x.currency, income=x.income, expense=x.expense, net=x.net, count=x.count, share=round(float(x.expense / whole[x.currency]), 4) if whole.get(x.currency) else 0.0))  # type: ignore[arg-type]
     today = timezone.now().date()
-    statuses = budget_logic.budget_status(
-        models.Budget.objects.filter(organization_id=w.organization_id, category=category), models.Transaction.objects.filter(account__organization_id=w.organization_id), w.organization_id, today
-    )
+    statuses = budget_logic.budget_status(models.Budget.objects.filter(organization_id=w.organization_id, category=category), models.Transaction.objects.filter(account__organization_id=w.organization_id), w.organization_id, today)
     return t.CategoryInsights(
         category=category,  # type: ignore[arg-type]
         window=w.info,
@@ -200,12 +195,7 @@ def period_overview(w: Window, limit: int) -> t.PeriodOverview:
     merchant_moves = _movers(w.qs.exclude(merchant=None), w.previous_qs.exclude(merchant=None) if w.previous_qs is not None else None, "merchant_id", limit)
     categories = models.Category.objects.in_bulk([k for k, _ in category_moves if k])
     merchants = models.Merchant.objects.in_bulk([k for k, _ in merchant_moves if k])
-    new = (
-        models.Merchant.objects.filter(organization_id=w.organization_id)
-        .annotate(_first=Min("transactions__booking_date"))
-        .filter(_first__gte=w.start, _first__lte=w.end)
-        .order_by("_first", "name")
-    )
+    new = models.Merchant.objects.filter(organization_id=w.organization_id).annotate(_first=Min("transactions__booking_date")).filter(_first__gte=w.start, _first__lte=w.end).order_by("_first", "name")
     due = models.RecurringPayment.objects.filter(organization_id=w.organization_id, status=models.RecurringStatus.CONFIRMED, next_expected__gte=w.start, next_expected__lte=w.end).order_by("next_expected")
     return t.PeriodOverview(
         window=w.info,
@@ -226,7 +216,7 @@ def period_overview(w: Window, limit: int) -> t.PeriodOverview:
 # --- portfolio ---------------------------------------------------------------------------------------
 
 
-def portfolio_insights(info, accounts: list[models.BankAccount] | None, date_from: datetime.date | None) -> t.PortfolioInsights:  # noqa: ANN001
+def portfolio_insights(info, accounts: list[models.BankAccount] | None, date_from: datetime.date | None, as_of: datetime.date | None = None) -> t.PortfolioInsights:  # noqa: ANN001
     scoped = for_org(models.BankAccount, info)
     chosen = accounts if accounts is not None else list(scoped)
     depots = [a for a in chosen if a.kind == models.AccountKind.DEPOT]
@@ -246,11 +236,14 @@ def portfolio_insights(info, accounts: list[models.BankAccount] | None, date_fro
     from finance.prices.portfolio import daily_values
 
     organization_id = info.context.request.organization.id
-    daily = daily_values(organization_id, depots, date_from, timezone.now().date()) if depots else []
+    until = as_of or timezone.now().date()
+    daily = daily_values(organization_id, depots, date_from, until) if depots else []
     if not daily:
         snapshots = models.BalanceSnapshot.objects.filter(account__in=depots, balance_type="VALU")
         if date_from:
             snapshots = snapshots.filter(date__gte=date_from)
+        if as_of:
+            snapshots = snapshots.filter(date__lte=as_of)
         daily = [(r["date"], r["currency"], r["total"]) for r in snapshots.values("date", "currency").annotate(total=Sum("amount")).order_by("date", "currency")]
     history = []
     for day, currency, value in daily:
@@ -258,8 +251,10 @@ def portfolio_insights(info, accounts: list[models.BankAccount] | None, date_fro
         history.append(t.ValuationPoint(date=day, currency=currency, valuation=value, invested=invested, gain=value - invested))
 
     positions = []
+    # Each depot's latest synced day (on or before as_of, when asked about a past day).
     for depot in depots:
-        latest = depot.holdings.aggregate(day=Max("date"))["day"]
+        held = depot.holdings.filter(date__lte=as_of) if as_of else depot.holdings
+        latest = held.aggregate(day=Max("date"))["day"]
         if latest:
             positions.extend(depot.holdings.filter(date=latest).order_by("-valuation"))
     valuation: dict[str, Decimal] = defaultdict(Decimal)
@@ -270,15 +265,14 @@ def portfolio_insights(info, accounts: list[models.BankAccount] | None, date_fro
         by_type[(p.security_type or "OTHER", p.currency)] += p.valuation
         if p.fifo_price is not None:
             cost[p.currency] += (p.quantity * p.fifo_price).quantize(c.CENT)
-    allocation = [
-        t.Allocation(security_type=kind, currency=cur, valuation=amount, share=round(float(amount / valuation[cur]), 4) if valuation[cur] else 0.0)
-        for (kind, cur), amount in sorted(by_type.items(), key=lambda item: -item[1])
-    ]
+    allocation = [t.Allocation(security_type=kind, currency=cur, valuation=amount, share=round(float(amount / valuation[cur]), 4) if valuation[cur] else 0.0) for (kind, cur), amount in sorted(by_type.items(), key=lambda item: -item[1])]
 
     merged = merge_positions(positions)
     income_rows = txs.filter(kind__in=INVESTMENT_INCOME)
     if date_from:
         income_rows = income_rows.filter(booking_date__gte=date_from)
+    if as_of:
+        income_rows = income_rows.filter(booking_date__lte=as_of)
     income = [
         t.InvestmentIncome(year=r["_year"], kind=enums.TransactionKind(r["kind"]), currency=r["currency"], amount=r["total"], count=r["count"])
         for r in income_rows.annotate(_year=ExtractYear("booking_date")).values("_year", "kind", "currency").annotate(total=Sum("amount"), count=Count("id")).order_by("-_year", "kind", "currency")
@@ -353,10 +347,7 @@ def recurring_insights(organization_id: int, include_detected: bool) -> t.Recurr
             changes.append(t.PriceChange(recurring=p, currency=p.currency, previous=history[-2].amount, current=history[-1].amount, delta=history[-1].amount - history[-2].amount))  # type: ignore[arg-type]
     categories = models.Category.objects.in_bulk([k for k, _ in by_category if k])
     return t.RecurringInsights(
-        monthly_committed=[
-            t.MoneyTotals(currency=cur, income=sum((v for v in vals if v > 0), Decimal("0.00")), expense=-sum((v for v in vals if v < 0), Decimal("0.00")), net=sum(vals, Decimal("0.00")), count=len(vals))
-            for cur, vals in sorted(committed.items())
-        ],
+        monthly_committed=[t.MoneyTotals(currency=cur, income=sum((v for v in vals if v > 0), Decimal("0.00")), expense=-sum((v for v in vals if v < 0), Decimal("0.00")), net=sum(vals, Decimal("0.00")), count=len(vals)) for cur, vals in sorted(committed.items())],
         by_category=sorted(
             (t.CategoryCommitment(category=categories.get(k), currency=cur, monthly=-sum(vals, Decimal("0.00")), count=len(vals)) for (k, cur), vals in by_category.items()),  # type: ignore[arg-type]
             key=lambda x: (-x.monthly, x.currency),
