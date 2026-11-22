@@ -9,6 +9,8 @@ from decimal import Decimal
 from typing import List, Optional
 
 import strawberry
+from asgiref.sync import sync_to_async
+from django.db.models import QuerySet
 
 from finance import enums
 from finance.filters import BoundsInput, NearInput
@@ -187,8 +189,15 @@ class AreaInsights:
     totals: List[MoneyTotals]
     merchants: List[RankedMerchant]
     categories: List[RankedCategory]
-    locations: List[RankedLocation]
     monthly: List[CashflowBucket]
+    rows: strawberry.Private[QuerySet]
+    limit: strawberry.Private[int]
+
+    @strawberry.field(description="Its places by expense, largest first (ranked only when asked for).")
+    async def locations(self) -> List[RankedLocation]:
+        from finance.insights.common import ranked_locations
+
+        return await sync_to_async(ranked_locations)(self.rows, self.limit)
 
 
 @strawberry.type(description="What a map styles a spending-grid cell by.")
@@ -229,9 +238,16 @@ class CategoryInsights:
     share_of_spending: List[Share] = strawberry.field(description="Its part of all expense.")
     children: List[RankedCategory]
     top_merchants: List[RankedMerchant]
-    top_counterparties: List[CounterpartyTotal]
     budgets: List[BudgetStatus] = strawberry.field(description="This month's status of budgets on it.")
     tickets: List[TicketStats]
+    rows: strawberry.Private[QuerySet]
+
+    @strawberry.field(description="The counterparties it pays most, largest first (ranked only when asked for).")
+    async def top_counterparties(self) -> List[CounterpartyTotal]:
+        from finance import stats
+
+        totals = await sync_to_async(stats.top_counterparties)(self.rows, "OUT", 10)
+        return [CounterpartyTotal(counterparty=x.counterparty, currency=x.currency, total=x.total, count=x.count) for x in totals]
 
 
 @strawberry.type(description="A category that moved most against the comparison window.")

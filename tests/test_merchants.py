@@ -396,3 +396,29 @@ async def test_a_hidden_default_category_stays_out(link, aexecute, fakebank):
     text = (await aexecute(SEMANTIC, {"t": (await _rows(aexecute, acc))["MCDONALDS 01476"][0]["id"]})).data["transaction"]["semanticInput"]
 
     assert text == "mcdonalds mcdonalds mcdonalds"  # line, merchant, place "McDonalds 01476" — no "eating out"
+
+
+MERCHANT_FIGURES = "query($f: MerchantFilter) { merchants(filters: $f) { name transactionCount firstSeen lastSeen net { currency amount } locations { storeCode transactionCount lastVisit } } }"
+
+
+async def test_a_merchant_lists_its_figures_whatever_the_filter_joins(link, aexecute, fakebank):
+    acc, _ = await _bank(link, aexecute, fakebank, [*SHOPS, tx("-2.00", "2026-09-09", "Spar Dankt 3418")])
+    rows = await _rows(aexecute, acc)
+    await aexecute(CREATE, {"input": {"name": "Spar", "fromTransactions": _ids(rows, "Spar Dankt 3418", "Spar Dankt 3428"), "aliases": ["spar dankt"]}})
+    await aexecute(CREATE, {"input": {"name": "Quiet", "aliases": ["nobody pays here"]}})
+
+    listed = {m["name"]: m for m in (await aexecute(MERCHANT_FIGURES)).data["merchants"]}
+    # A search joins the aliases (two for Spar): the figures must not multiply with them.
+    searched = (await aexecute(MERCHANT_FIGURES, {"f": {"search": "spar"}})).data["merchants"]
+    # The same merchant reached through a transaction resolves the same figures.
+    nested = (await aexecute(f"query($a: ID!) {{ transactions(filters: {{accounts: [$a]}}) {{ counterparty merchant {{ transactionCount firstSeen lastSeen net {{ amount }} }} merchantLocation {{ transactionCount lastVisit }} }} }}", {"a": acc})).data["transactions"]
+
+    spar = listed["Spar"]
+    assert (spar["transactionCount"], spar["firstSeen"], spar["lastSeen"]) == (3, "2026-09-01", "2026-09-09")
+    assert spar["net"] == [{"currency": "EUR", "amount": "-44.00"}]
+    assert sorted((l["storeCode"], l["transactionCount"], l["lastVisit"]) for l in spar["locations"]) == [("3418", 2, "2026-09-09"), ("3428", 1, "2026-09-03")]
+    assert listed["Quiet"] | {"name": None} == {"name": None, "transactionCount": 0, "firstSeen": None, "lastSeen": None, "net": [], "locations": []}
+    assert [m["name"] for m in searched] == ["Spar"] and searched[0]["transactionCount"] == 3 and searched[0]["net"] == spar["net"]
+    via_line = next(t for t in nested if t["counterparty"] == "Spar Dankt 3428")
+    assert via_line["merchant"] == {"transactionCount": 3, "firstSeen": "2026-09-01", "lastSeen": "2026-09-09", "net": [{"amount": "-44.00"}]}
+    assert via_line["merchantLocation"] == {"transactionCount": 1, "lastVisit": "2026-09-03"}

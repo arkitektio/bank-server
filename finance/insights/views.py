@@ -20,7 +20,7 @@ from finance.budgets import descendants
 from finance.insights import common as c
 from finance.insights.common import Window
 from finance.scoping import for_org
-from finance.types import BudgetStatus, CounterpartyTotal, CurrencyTotal, PointGeometry
+from finance.types import BudgetStatus, CurrencyTotal, PointGeometry
 from finance.types import insights as t
 
 INVESTING = [models.TransactionKind.BUY, models.TransactionKind.SELL, models.TransactionKind.SAVINGS_PLAN]
@@ -87,8 +87,9 @@ def area_insights(area: t.AreaInput, w: Window, limit: int) -> t.AreaInsights:
         totals=c.totals(qs),
         merchants=c.ranked_merchants(qs, limit),
         categories=c.ranked_categories(qs, limit),
-        locations=c.ranked_locations(qs, limit),
         monthly=c.monthly(qs),
+        rows=qs,
+        limit=limit,
     )
 
 
@@ -167,9 +168,9 @@ def category_insights(category: models.Category, w: Window, include_children: bo
         share_of_spending=c.shares(c.expense_by_currency(qs), c.expense_by_currency(w.qs)),
         children=sorted(children, key=lambda r: (-r.expense, r.currency)),
         top_merchants=c.ranked_merchants(qs.exclude(merchant=None), 10),
-        top_counterparties=[CounterpartyTotal(counterparty=x.counterparty, currency=x.currency, total=x.total, count=x.count) for x in stats.top_counterparties(qs, "OUT", 10)],
         budgets=[BudgetStatus(budget=s.budget, month=s.month, budgeted=s.budgeted, spent=s.spent, remaining=s.remaining, ratio=s.ratio) for s in statuses],  # type: ignore[arg-type]
         tickets=c.tickets(qs),
+        rows=qs,
     )
 
 

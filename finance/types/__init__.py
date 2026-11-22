@@ -12,7 +12,9 @@ from typing import List, Optional
 import kante
 import strawberry
 import strawberry_django
-from django.db.models import Max, Min, Sum
+from django.contrib.postgres.expressions import ArraySubquery
+from django.db.models import CharField, Count, F, IntegerField, Max, Min, OuterRef, QuerySet, Subquery, Sum, Value
+from django.db.models.functions import Cast, Coalesce, JSONObject
 from django.utils import timezone
 from strawberry.scalars import JSON
 
@@ -312,6 +314,11 @@ class BankAccount(OrgScoped):
         latest = self.holdings.order_by("-date").values_list("date", flat=True).first()  # type: ignore[attr-defined]
         return list(self.holdings.filter(date=latest).order_by("-valuation")) if latest else []  # type: ignore[attr-defined, return-value]
 
+    @strawberry_django.field(description="How many positions a depot held at its latest sync (`currentHoldings`, counted; 0 for other accounts).")
+    def holdings_count(self) -> int:
+        latest = self.holdings.order_by("-date").values_list("date", flat=True).first()  # type: ignore[attr-defined]
+        return self.holdings.filter(date=latest).count() if latest else 0  # type: ignore[attr-defined]
+
     @strawberry_django.field(description="True while a sync holds one of the account's syncers.")
     def is_syncing(self) -> bool:
         now = timezone.now()
@@ -441,8 +448,10 @@ class Transaction(OrgScoped):
     def semantic_input(self) -> Optional[str]:
         return self.embedding_source_text()  # type: ignore[attr-defined]
 
-    @strawberry_django.field(description="The categories this transaction most likely belongs to, best first — from similar transactions the organization categorized and from category terms. Empty when it has no embedding yet.")
-    def suggested_categories(self, limit: int = 3) -> List["CategorySuggestion"]:
+    @strawberry_django.field(description="The categories this transaction most likely belongs to, best first — from similar transactions the organization categorized and from category terms. Empty when it has no embedding yet. `unsettledOnly`: also empty for a settled row (a transfer, a provider `kind`, or a category set by a user, rule, merchant or import), so a list ranks only the rows it offers suggestions on.")
+    def suggested_categories(self, limit: int = 3, unsettled_only: bool = False) -> List["CategorySuggestion"]:
+        if unsettled_only and is_settled(self):  # type: ignore[arg-type]
+            return []
         return category_suggestions(self, limit)  # type: ignore[arg-type]
 
     @strawberry_django.field(description="The organization's transactions most similar to this one (same merchant, same kind of payment), closest first. `maxDistance` (cosine, 0–2) drops the far ones.")
@@ -500,6 +509,13 @@ class CategorySuggestion:
     reason: enums.SuggestionReason
     neighbours: int = strawberry.field(description="How many similar categorized transactions voted for it.")
     evidence: List[Transaction] = strawberry.field(description="Up to three of those transactions.")
+
+
+def is_settled(tx: models.Transaction) -> bool:
+    """Whether a transaction needs no category suggestion: a transfer, a provider transaction type, or a category nobody would second-guess (anything but SEMANTIC)."""
+    if tx.is_transfer or tx.kind:
+        return True
+    return tx.category_id is not None and tx.category_source != models.CategorySource.SEMANTIC  # type: ignore[attr-defined]
 
 
 def category_suggestions(tx: models.Transaction, limit: int) -> list[CategorySuggestion]:
@@ -601,6 +617,33 @@ class BalanceTotal:
     accounts: int = strawberry.field(description="How many accounts reported a balance.")
 
 
+_UNSET = object()
+
+
+def _rows_of(relation: str) -> "QuerySet[models.Transaction, dict[str, object]]":
+    """The transactions of the outer row (a merchant or a place), grouped to one group for an aggregate."""
+    return models.Transaction.objects.filter(**{relation: OuterRef("pk")}).order_by().values(relation)
+
+
+def _count_of(relation: str) -> Coalesce:
+    """How many transactions the outer row has, as one correlated subquery (no join that a filter could narrow)."""
+    return Coalesce(Subquery(_rows_of(relation).annotate(n=Count("pk")).values("n")[:1], output_field=IntegerField()), Value(0))
+
+
+def _first_day_of(relation: str) -> Subquery:
+    return Subquery(_rows_of(relation).annotate(d=Min("booking_date")).values("d")[:1])
+
+
+def _last_day_of(relation: str) -> Subquery:
+    return Subquery(_rows_of(relation).annotate(d=Max("booking_date")).values("d")[:1])
+
+
+def _net_of(relation: str) -> ArraySubquery:
+    """Σ of the booked amounts per currency, as `{currency, total}` rows (the total as text: no float on the way)."""
+    rows = models.Transaction.objects.filter(**{relation: OuterRef("pk")}, status=models.TransactionStatus.BOOKED).order_by("currency").values("currency")
+    return ArraySubquery(rows.annotate(row=JSONObject(currency=F("currency"), total=Cast(Sum("amount"), CharField()))).values("row"))
+
+
 @kante.django_type(models.MerchantAlias, description="A normalized counterparty prefix that means this merchant (\"spar\" matches \"Spar Dankt 3418\").")
 class MerchantAlias(OrgScoped):
     id: strawberry.ID
@@ -633,13 +676,17 @@ class MerchantLocation(OrgScoped):
     def distance_meters(self) -> Optional[float]:
         return getattr(self, "_distance_meters", None)
 
-    @strawberry_django.field(description="How many transactions happened here.")
+    @strawberry_django.field(description="How many transactions happened here.", annotate={"_transaction_count": _count_of("merchant_location")})
     def transaction_count(self) -> int:
-        return self.transactions.count()  # type: ignore[attr-defined]
+        counted = getattr(self, "_transaction_count", None)
+        return counted if isinstance(counted, int) else self.transactions.count()  # type: ignore[attr-defined]
 
-    @strawberry_django.field(description="The day of the latest transaction here.")
+    @strawberry_django.field(description="The day of the latest transaction here.", annotate={"_last_visit": _last_day_of("merchant_location")})
     def last_visit(self) -> Optional[datetime.date]:
-        return self.transactions.aggregate(last=Max("booking_date"))["last"]  # type: ignore[attr-defined]
+        last = getattr(self, "_last_visit", _UNSET)
+        if last is _UNSET:
+            return self.transactions.aggregate(last=Max("booking_date"))["last"]  # type: ignore[attr-defined]
+        return last if isinstance(last, datetime.date) else None
 
 
 @kante.django_type(models.Merchant, pagination=True, filters=filters.MerchantFilter, ordering=filters.MerchantOrder, description="Someone the organization pays or is paid by. Recognized on bank lines by its aliases; its default category categorizes its transactions (after rules, before suggestions).")
@@ -663,22 +710,32 @@ class Merchant(OrgScoped):
     def distance_meters(self) -> Optional[float]:
         return getattr(self, "_distance_meters", None)
 
-    @strawberry_django.field(description="How many transactions it has.")
+    @strawberry_django.field(description="How many transactions it has.", annotate={"_transaction_count": _count_of("merchant")})
     def transaction_count(self) -> int:
-        return self.transactions.count()  # type: ignore[attr-defined]
+        counted = getattr(self, "_transaction_count", None)
+        return counted if isinstance(counted, int) else self.transactions.count()  # type: ignore[attr-defined]
 
-    @strawberry_django.field(description="The net amount per currency over its booked transactions (negative: money spent there).")
+    @strawberry_django.field(description="The net amount per currency over its booked transactions (negative: money spent there).", annotate={"_net": _net_of("merchant")})
     def net(self) -> List[CurrencyTotal]:
+        annotated = getattr(self, "_net", None)
+        if isinstance(annotated, list):
+            return [CurrencyTotal(currency=str(r["currency"]), amount=Decimal(str(r["total"]))) for r in annotated if isinstance(r, dict)]
         rows = self.transactions.filter(status=models.TransactionStatus.BOOKED).values("currency").annotate(total=Sum("amount")).order_by("currency")  # type: ignore[attr-defined]
         return [CurrencyTotal(currency=r["currency"], amount=r["total"]) for r in rows]
 
-    @strawberry_django.field(description="The day of its first transaction.")
+    @strawberry_django.field(description="The day of its first transaction.", annotate={"_first_seen": _first_day_of("merchant")})
     def first_seen(self) -> Optional[datetime.date]:
-        return self.transactions.aggregate(first=Min("booking_date"))["first"]  # type: ignore[attr-defined]
+        first = getattr(self, "_first_seen", _UNSET)
+        if first is _UNSET:
+            return self.transactions.aggregate(first=Min("booking_date"))["first"]  # type: ignore[attr-defined]
+        return first if isinstance(first, datetime.date) else None
 
-    @strawberry_django.field(description="The day of its latest transaction.")
+    @strawberry_django.field(description="The day of its latest transaction.", annotate={"_last_seen": _last_day_of("merchant")})
     def last_seen(self) -> Optional[datetime.date]:
-        return self.transactions.aggregate(last=Max("booking_date"))["last"]  # type: ignore[attr-defined]
+        last = getattr(self, "_last_seen", _UNSET)
+        if last is _UNSET:
+            return self.transactions.aggregate(last=Max("booking_date"))["last"]  # type: ignore[attr-defined]
+        return last if isinstance(last, datetime.date) else None
 
     @strawberry_django.field(description="The organization's merchants closest in meaning to this one (by name and description).")
     def similar_merchants(self, limit: int = 5) -> List["Merchant"]:

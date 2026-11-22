@@ -173,3 +173,20 @@ async def test_the_inbox_list_shape_resolves_suggestions(link, aexecute, fakeban
     assert first["suggestedCategories"][0]["category"]["key"] == "health.pharmacy"
     assert [s["counterparty"] for s in first["similarTransactions"]] == ["Apotheke zum Hirschen"]
     assert by_line["Mystery Merchant XY"]["suggestedCategories"] == []
+
+
+async def test_a_list_asks_suggestions_only_for_unsettled_rows(link, aexecute, fakebank):
+    acc, _ = await _bank(link, aexecute, fakebank, [tx("-9.80", "2026-09-02", "Apotheke zum Hirschen"), tx("-5.00", "2026-09-03", "Apotheke zum Hirschen"), tx("-4.50", "2026-09-04", "APOTHEKE AM MARKT")])
+    rows = await _rows(aexecute, acc)
+    shop = (await aexecute('mutation { createCategory(input: {name: "Drugstore"}) { id } }')).data["createCategory"]["id"]
+    # A user settles one line; the others keep the guess (SEMANTIC) or nothing.
+    await aexecute("mutation($ids: [ID!]!, $c: ID) { categorizeTransactions(ids: $ids, category: $c) { id } }", {"ids": [rows["APOTHEKE AM MARKT"]["id"]], "c": shop})
+
+    listed = (await aexecute(
+        "query($a: ID!) { transactions(filters: {accounts: [$a]}) { counterparty categorySource all: suggestedCategories(limit: 2) { category { key } } open: suggestedCategories(limit: 2, unsettledOnly: true) { category { key } } } }", {"a": acc}
+    )).data["transactions"]
+
+    settled = next(t for t in listed if t["counterparty"] == "APOTHEKE AM MARKT")
+    unsettled = [t for t in listed if t["counterparty"] == "Apotheke zum Hirschen"]
+    assert settled["categorySource"] == "MANUAL" and settled["all"] and settled["open"] == []
+    assert all(t["categorySource"] in ("SEMANTIC", "NONE") and t["open"] == t["all"] and t["open"] for t in unsettled)

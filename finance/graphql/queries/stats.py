@@ -75,10 +75,13 @@ def balance_history(info: Info, account: strawberry.ID, date_from: datetime.date
     return [types.BalancePoint(date=p.date, amount=p.amount, currency=p.currency, reported=p.reported) for p in points]
 
 
-def budget_status(info: Info, month: datetime.date | None = None) -> list[types.BudgetStatus]:
-    """Budgeted vs. spent for every budget active in a month (the current one by default)."""
+def budget_status(info: Info, month: datetime.date | None = None, category: strawberry.ID | None = None) -> list[types.BudgetStatus]:
+    """Budgeted vs. spent for every budget active in a month (the current one by default); `category`: only that category's budgets."""
     month = month or datetime.date.today()
-    rows = budget_logic.budget_status(for_org(models.Budget, info), for_org(models.Transaction, info), info.context.request.organization.id, month)
+    budgets = for_org(models.Budget, info)
+    if category is not None:
+        budgets = budgets.filter(category_id=category)
+    rows = budget_logic.budget_status(budgets, for_org(models.Transaction, info), info.context.request.organization.id, month)
     return [types.BudgetStatus(budget=r.budget, month=r.month, budgeted=r.budgeted, spent=r.spent, remaining=r.remaining, ratio=r.ratio) for r in rows]  # type: ignore[arg-type]
 
 

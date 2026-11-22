@@ -30,7 +30,7 @@ TXS = """
 query Txs($acc: ID!) { transactions(filters: {accounts: [$acc]}, ordering: [{bookingDate: ASC}]) { id amount status kind isin quantity counterparty isTransfer note } }
 """
 HOLDINGS = """
-query H($acc: ID!) { bankAccount(id: $acc) { currentHoldings { isin quantity price fifoPrice valuation unrealizedGain } } }
+query H($acc: ID!) { bankAccount(id: $acc) { holdingsCount currentHoldings { isin quantity price fifoPrice valuation unrealizedGain } } }
 """
 
 
@@ -82,8 +82,11 @@ async def test_sync_stores_transactions_balances_and_holdings(scalable_link, aex
     assert [(t["kind"], t["amount"], t["isTransfer"]) for t in txs] == [("DEPOSIT", "3000.00", True), ("BUY", "-500.00", True), ("DISTRIBUTION", "12.34", False)]
     assert txs[1]["isin"] == "IE00TEST0001" and txs[1]["quantity"] == "5.00000000"
 
-    positions = (await aexecute(HOLDINGS, {"acc": by["DEPOT"]["account"]["id"]})).data["bankAccount"]["currentHoldings"]
+    depot = (await aexecute(HOLDINGS, {"acc": by["DEPOT"]["account"]["id"]})).data["bankAccount"]
+    giro = (await aexecute(HOLDINGS, {"acc": by["CASH"]["account"]["id"]})).data["bankAccount"]
+    positions = depot["currentHoldings"]
     assert [(p["isin"], p["valuation"], p["unrealizedGain"]) for p in positions] == [("IE00TEST0001", "1000.00", "200.00"), ("IE00TEST0002", "100.00", "-25.00")]
+    assert depot["holdingsCount"] == 2 and giro["holdingsCount"] == 0 and giro["currentHoldings"] == []
 
 
 async def test_resync_is_idempotent_and_pending_order_updates_in_place(scalable_link, aexecute, fakescalable):

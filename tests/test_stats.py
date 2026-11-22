@@ -87,6 +87,19 @@ async def test_budget_status_rolls_up_children(seeded, aexecute):
     assert status["ratio"] == pytest.approx(1.2)
 
 
+async def test_budget_status_of_one_category(seeded, aexecute):
+    fun = (await aexecute('mutation { createCategory(input: {name: "Fun"}) { id } }')).data["createCategory"]["id"]
+    for category in (seeded["groceries"], fun):
+        await aexecute('mutation($c: ID!) { createBudget(input: {category: $c, amount: "100", startMonth: "2026-06-15"}) { startMonth } }', {"c": category})
+
+    query = 'query($c: ID) { budgetStatus(month: "2026-09-01", category: $c) { budget { category { id } } } }'
+    every = (await aexecute(query)).data["budgetStatus"]
+    one = (await aexecute(query, {"c": fun})).data["budgetStatus"]
+
+    assert {s["budget"]["category"]["id"] for s in every} == {seeded["groceries"], fun}
+    assert [s["budget"]["category"]["id"] for s in one] == [fun]
+
+
 async def test_recurring_detection_and_forecast(seeded, aexecute):
     result = await aexecute("mutation { detectRecurring { id label amount intervalDays nextExpected status } }")
     by_label = {r["label"]: r for r in result.data["detectRecurring"]}
