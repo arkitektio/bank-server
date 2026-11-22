@@ -279,6 +279,22 @@ class Allocation:
     share: float
 
 
+@strawberry.type(description="One security across every depot that holds it, in one currency (the same ETF in two depots is one position).")
+class MergedPosition:
+    isin: str
+    name: str
+    security_type: Optional[str]
+    currency: str
+    quantity: Decimal = strawberry.field(description="Σ quantity over the depots.")
+    price: Optional[Decimal] = strawberry.field(description="The last quoted mid price per unit (of the largest holding that reports one).")
+    valuation: Decimal = strawberry.field(description="Σ valuation over the depots.")
+    cost_basis: Optional[Decimal] = strawberry.field(description="Σ quantity × FIFO price; null when any lot reports no buy-in (e.g. transferred in).")
+    fifo_price: Optional[Decimal] = strawberry.field(description="costBasis / quantity: the quantity-weighted buy-in per unit; null with costBasis.")
+    unrealized_gain: Optional[Decimal] = strawberry.field(description="valuation − costBasis; null with costBasis.")
+    weight: float = strawberry.field(description="Share of the portfolio's valuation in the same currency, 0..1.")
+    depots: int = strawberry.field(description="How many depots hold it.")
+
+
 @strawberry.type(description="Investment income or cost in one year.")
 class InvestmentIncome:
     year: int
@@ -292,7 +308,8 @@ class InvestmentIncome:
 class PortfolioInsights:
     valuation_history: List[ValuationPoint]
     allocation: List[Allocation]
-    positions: List[HoldingSnapshot]
+    positions: List[HoldingSnapshot] = strawberry.field(description="Each depot's positions on its latest day, one per depot and ISIN.")
+    merged_positions: List[MergedPosition] = strawberry.field(description="The positions summed by ISIN and currency across depots, largest first. Exact (decimal) arithmetic.")
     valuation: List[CurrencyTotal]
     cost_basis: List[CurrencyTotal] = strawberry.field(description="Σ quantity × FIFO price of the current positions.")
     unrealized_gain: List[CurrencyTotal]

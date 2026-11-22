@@ -96,6 +96,7 @@ class Query:
     merchant_location: types.MerchantLocation = field(resolver=queries.merchant_location, description="A merchant location by id.")
     merchant_locations_geojson: types.MerchantLocationFeatureCollection = field(resolver=queries.merchant_locations_geojson, description="Located merchant places as a typed GeoJSON FeatureCollection (valid GeoJSON as returned — hand it to a map renderer); same filters as `merchantLocations`, e.g. `within` a viewport.")
     merchant_candidates: list[types.MerchantCandidate] = field(resolver=queries.merchant_candidates, description="Recurring counterparties without a merchant.")
+    merchant_candidates_count: int = field(resolver=queries.merchant_candidates_count, description="How many recurring counterparties have no merchant (all of them, past `merchantCandidates`' limit).")
     spending_by_merchant: list[types.MerchantTotal] = field(resolver=queries.spending_by_merchant, description="Income, expense and net per merchant and currency.")
     geocode_search: list[types.GeocodeResult] = field(resolver=queries.geocode_search, description="Places matching an address or name (OpenStreetMap).")
     # Security prices (finance/prices): Scalable, Twelve Data, Yahoo behind one interface.
@@ -127,6 +128,7 @@ class Query:
     bank_institutions: list[types.Institution] = field(resolver=queries.bank_institutions, description="The banks a provider can link in a country.")
     auth_session: types.AuthSession = field(resolver=mutations.auth_session, description="Where a login is. No side effect.")
 
+    balance_totals: list[types.BalanceTotal] = field(resolver=queries.balance_totals, description="The latest balance of every account (or the filtered ones), summed per account kind and currency.")
     spending_by_category: list[types.CategoryTotal] = field(resolver=queries.spending_by_category, description="Income, expense and net per category and currency.")
     cashflow: list[types.CashflowBucket] = field(resolver=queries.cashflow, description="Income, expense and net per month or week and currency.")
     top_counterparties: list[types.CounterpartyTotal] = field(resolver=queries.top_counterparties, description="Where the most money went, or came from.")
@@ -213,7 +215,8 @@ class Mutation:
 class Subscription:
     """The root subscription type."""
 
-    account_syncs = subscription(resolver=subscriptions.account_syncs, description="Events whenever one of the organization's accounts finished syncing.")
+    account_syncs = subscription(resolver=subscriptions.account_syncs, description="Events whenever one of the organization's accounts (or `account`) finished syncing.")
+    auth_session = subscription(resolver=subscriptions.auth_session, description="A login as it is now, then whenever it changes, until it is no longer PENDING. Only its starter may watch it.")
 
 
 # A federation schema is required because the authentikate types (User,

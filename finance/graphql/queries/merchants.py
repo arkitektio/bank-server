@@ -15,7 +15,7 @@ from finance.graphql.errors import translate
 from finance.graphql.utils import get_many, get_or_404
 from finance.scoping import for_org
 
-__all__ = ["merchant", "merchant_location", "merchant_candidates", "spending_by_merchant", "geocode_search", "merchant_locations_geojson"]
+__all__ = ["merchant", "merchant_location", "merchant_candidates", "merchant_candidates_count", "spending_by_merchant", "geocode_search", "merchant_locations_geojson"]
 
 
 def merchant(info: Info, id: strawberry.ID) -> types.Merchant:
@@ -45,6 +45,11 @@ def merchant_candidates(info: Info, limit: int = 20, min_count: int = 2) -> list
             )
         )
     return out
+
+
+def merchant_candidates_count(info: Info, min_count: int = 2) -> int:
+    """How many counterparties recur without a merchant (every one `merchantCandidates` could list, past its limit)."""
+    return merchants.candidate_count(info.context.request.organization.id, min_count)
 
 
 def spending_by_merchant(

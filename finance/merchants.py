@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction as db_transaction
+from django.db.models import Count
 
 from finance import models
 from finance.textnorm import normalize
@@ -197,6 +198,22 @@ def candidates(organization_id: int, limit: int = 20, min_count: int = 2) -> lis
         out.append(Candidate(key, len(txs), dict(totals), samples, len(codes), txs[0], [tx.id for tx in txs]))
     out.sort(key=lambda c: (-c.count, c.key))
     return out[:limit]
+
+
+def candidate_count(organization_id: int, min_count: int = 2) -> int:
+    """How many candidates :func:`candidates` would find with no limit: one grouped query, nothing suggested."""
+    per_key: Counter[str] = Counter()
+    rows = (
+        models.Transaction.objects.filter(account__organization_id=organization_id, merchant__isnull=True, counterparty__isnull=False)
+        .order_by()
+        .values_list("counterparty")
+        .annotate(n=Count("id"))
+    )
+    for counterparty, n in rows:
+        key = merchant_key(counterparty)
+        if key:
+            per_key[key] += n
+    return sum(1 for n in per_key.values() if n >= min_count)
 
 
 def keys_of(transactions: list[models.Transaction]) -> list[str]:

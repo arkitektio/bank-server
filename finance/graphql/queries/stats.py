@@ -5,17 +5,20 @@ rows — an account id from another organization is NOT_FOUND like any other.
 """
 
 import datetime
+from typing import Optional
 
 import strawberry
+import strawberry_django
 from kante.types import Info
 
 from finance import budgets as budget_logic
 from finance import enums, models, stats, types
+from finance import filters as filters_module
 from finance.forecast import forecast as forecast_logic
 from finance.graphql.utils import get_many, get_or_404
 from finance.scoping import for_org
 
-__all__ = ["spending_by_category", "cashflow", "top_counterparties", "balance_history", "budget_status", "forecast"]
+__all__ = ["balance_totals", "spending_by_category", "cashflow", "top_counterparties", "balance_history", "budget_status", "forecast"]
 
 
 def _scoped_window(info: Info, date_from, date_to, accounts, include_transfers: bool):  # noqa: ANN001, ANN202
@@ -101,3 +104,11 @@ def forecast(
         transactions=for_org(models.Transaction, info) if include_budgets else None,
     )
     return [types.ForecastPoint(date=p.date, amount=p.amount, currency=p.currency) for p in points]
+
+
+def balance_totals(info: Info, filters: Optional[filters_module.BankAccountFilter] = None) -> list[types.BalanceTotal]:
+    """The latest balance of every visible account (or the filtered ones), summed per account kind and currency."""
+    accounts = for_org(models.BankAccount, info)
+    if filters is not None:
+        accounts = strawberry_django.filters.apply(filters, accounts, info)
+    return [types.BalanceTotal(kind=enums.AccountKind(t.kind), currency=t.currency, amount=t.amount, accounts=t.accounts) for t in stats.balance_totals(accounts)]

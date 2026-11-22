@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db.models import Count, DecimalField, Q, QuerySet, Sum, Value
+from django.db.models import Case, Count, DecimalField, IntegerField, Q, QuerySet, Sum, Value, When
 from django.db.models.functions import Coalesce, TruncMonth, TruncWeek
 
 from finance import models
@@ -143,6 +143,34 @@ def latest_balance(account: models.BankAccount) -> models.BalanceSnapshot | None
         return None
     newest = [s for s in snapshots if s.date == snapshots[0].date]
     return min(newest, key=lambda s: BALANCE_PREFERENCE.index(s.balance_type) if s.balance_type in BALANCE_PREFERENCE else len(BALANCE_PREFERENCE))
+
+
+@dataclass
+class BalanceTotal:
+    """The latest balances of some accounts of one kind, summed in one currency."""
+
+    kind: str
+    currency: str
+    amount: Decimal
+    accounts: int
+
+
+def balance_totals(accounts: QuerySet) -> list[BalanceTotal]:
+    """Each account's :func:`latest_balance`, summed per account kind and currency (one query, however many accounts)."""
+    preference = Case(*[When(balance_type=code, then=Value(rank)) for rank, code in enumerate(BALANCE_PREFERENCE)], default=Value(len(BALANCE_PREFERENCE)), output_field=IntegerField())
+    latest = (
+        models.BalanceSnapshot.objects.filter(account__in=accounts.order_by().values("id"))
+        .annotate(_preference=preference)
+        .order_by("account_id", "-date", "_preference")
+        .distinct("account_id")
+        .values_list("account__kind", "currency", "amount")
+    )
+    sums: dict[tuple[str, str], BalanceTotal] = {}
+    for kind, currency, amount in latest:
+        row = sums.setdefault((kind, currency), BalanceTotal(kind, currency, Decimal(0), 0))
+        row.amount += amount
+        row.accounts += 1
+    return sorted(sums.values(), key=lambda t: (t.kind, t.currency))
 
 
 @dataclass

@@ -275,6 +275,7 @@ def portfolio_insights(info, accounts: list[models.BankAccount] | None, date_fro
         for (kind, cur), amount in sorted(by_type.items(), key=lambda item: -item[1])
     ]
 
+    merged = merge_positions(positions)
     income_rows = txs.filter(kind__in=INVESTMENT_INCOME)
     if date_from:
         income_rows = income_rows.filter(booking_date__gte=date_from)
@@ -286,11 +287,47 @@ def portfolio_insights(info, accounts: list[models.BankAccount] | None, date_fro
         valuation_history=history,
         allocation=allocation,
         positions=positions,  # type: ignore[arg-type]
+        merged_positions=merged,
         valuation=[CurrencyTotal(currency=k, amount=v) for k, v in sorted(valuation.items())],
         cost_basis=[CurrencyTotal(currency=k, amount=v) for k, v in sorted(cost.items())],
         unrealized_gain=[CurrencyTotal(currency=k, amount=valuation[k] - cost.get(k, Decimal(0))) for k in sorted(valuation) if k in cost],
         income=income,
     )
+
+
+def merge_positions(positions: list[models.HoldingSnapshot]) -> list[t.MergedPosition]:
+    """Positions summed by ISIN and currency, largest first: a cost (and so a gain) only where every lot reports a buy-in."""
+    groups: dict[tuple[str, str], list[models.HoldingSnapshot]] = defaultdict(list)
+    for p in positions:
+        groups[(p.isin, p.currency)].append(p)
+    totals: dict[str, Decimal] = defaultdict(Decimal)
+    for (_, currency), lots in groups.items():
+        totals[currency] += sum((p.valuation for p in lots), Decimal(0))
+    out = []
+    for (isin, currency), lots in groups.items():
+        lots.sort(key=lambda p: -p.valuation)
+        quantity = sum((p.quantity for p in lots), Decimal(0))
+        valuation = sum((p.valuation for p in lots), Decimal(0))
+        known = all(p.fifo_price is not None for p in lots)
+        cost = sum(((p.quantity * p.fifo_price).quantize(c.CENT) for p in lots if p.fifo_price is not None), Decimal(0)) if known else None
+        out.append(
+            t.MergedPosition(
+                isin=isin,
+                name=lots[0].name,
+                security_type=next((p.security_type for p in lots if p.security_type), None),
+                currency=currency,
+                quantity=quantity,
+                price=next((p.price for p in lots if p.price is not None), None),
+                valuation=valuation,
+                cost_basis=cost,
+                fifo_price=(cost / quantity).quantize(Decimal("0.000001")) if cost is not None and quantity else None,
+                unrealized_gain=valuation - cost if cost is not None else None,
+                weight=round(float(valuation / totals[currency]), 4) if totals[currency] else 0.0,
+                depots=len({p.account_id for p in lots}),
+            )
+        )
+    out.sort(key=lambda m: (-m.valuation, m.isin))
+    return out
 
 
 # --- recurring ---------------------------------------------------------------------------------------

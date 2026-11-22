@@ -20,6 +20,7 @@ from channels.db import database_sync_to_async
 from django.utils import timezone
 
 from finance import models
+from finance.channels import announce_auth
 from finance.providers.base import AuthResult, AuthSession, AuthStatus, LinkCompletion
 from finance.providers.errors import LinkError
 from finance.providers.registry import backend_for, kind_of, provider_of, usable
@@ -94,7 +95,8 @@ async def complete(connection: models.BankConnection, code: str | None = None, e
             await connection.arefresh_from_db()
         else:
             backend = usable(await provider_of(connection), "This login")
-            connection = await backend.complete_link(connection, LinkCompletion(code=code))
+            connection = await backend.complete_link(connection, LinkCompletion(code=code))  # raises only while the login stays PENDING
+        await announce_auth(connection.state)
     return describe(connection)
 
 
@@ -127,4 +129,5 @@ async def cancel(connection: models.BankConnection) -> AuthSession:
                 pass
         await database_sync_to_async(_cancel)(connection.id)
         await connection.arefresh_from_db()
+        await announce_auth(connection.state)
     return describe(connection)

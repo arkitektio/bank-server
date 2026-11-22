@@ -593,6 +593,14 @@ class CurrencyTotal:
     amount: Decimal
 
 
+@strawberry.type(description="The latest balances of the accounts of one kind, summed in one currency (a depot's is its market valuation).")
+class BalanceTotal:
+    kind: enums.AccountKind
+    currency: str
+    amount: Decimal = strawberry.field(description="Σ of each account's newest balance, of the most authoritative type (`latestBalance`).")
+    accounts: int = strawberry.field(description="How many accounts reported a balance.")
+
+
 @kante.django_type(models.MerchantAlias, description="A normalized counterparty prefix that means this merchant (\"spar\" matches \"Spar Dankt 3418\").")
 class MerchantAlias(OrgScoped):
     id: strawberry.ID

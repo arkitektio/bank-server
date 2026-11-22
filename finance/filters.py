@@ -11,6 +11,7 @@ from enum import Enum
 import strawberry
 import strawberry_django
 from django.db.models import F, Max, Q, QuerySet
+from django.utils import timezone
 from kante.types import Info
 
 from embeddings import search
@@ -95,6 +96,12 @@ class BankConnectionFilter:
     def provider(self, value: strawberry.ID, prefix: str) -> Q:
         """Only connections made through this provider."""
         return Q(**{f"{prefix}bank_provider_id": value})
+
+    @strawberry_django.filter_field
+    def needs_reauth(self, value: bool, prefix: str) -> Q:
+        """Only connections whose consent ran out or was withdrawn (true), or only the others (false): the same as `needsReauth`."""
+        q = Q(**{f"{prefix}status": models.ConnectionStatus.EXPIRED}) | Q(**{f"{prefix}status": models.ConnectionStatus.ACTIVE, f"{prefix}valid_until__lte": timezone.now()})
+        return q if value else ~q
 
 
 @strawberry_django.filter_type(models.BankProvider)

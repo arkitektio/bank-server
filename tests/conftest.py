@@ -466,6 +466,132 @@ def other_org_context(transactional_db) -> HttpContext:
 
 
 @pytest.fixture
+async def ws_contexts(authenticated_context):
+    """A factory for websocket contexts, to run subscriptions in-process against the in-memory channel layer.
+
+    Each context gets its own consumer, plus a pump task that feeds the layer's messages into the
+    consumer's listen queues (what the real websocket handler does). The AuthentikateExtension
+    authenticates a context from ``connection_params["token"]`` (a static test token).
+    """
+    import asyncio
+    import contextlib
+
+    from channels.layers import get_channel_layer
+    from kante.context import WsContext
+    from strawberry.channels import ChannelsConsumer
+
+    layer = get_channel_layer()
+    await layer.flush()  # a process-wide singleton: drop what earlier tests left
+    pumps = []
+
+    async def make(token: str = "test") -> WsContext:
+        consumer = ChannelsConsumer()
+        consumer.channel_layer = layer
+        consumer.channel_name = await layer.new_channel()
+
+        async def pump() -> None:
+            while True:
+                await consumer.dispatch(await layer.receive(consumer.channel_name))
+
+        pumps.append(asyncio.create_task(pump()))
+        return WsContext(request=UniversalRequest(_extensions={"token": token}), response=TemporalResponse(), connection_params={"token": token}, consumer=consumer)
+
+    yield make
+    for task in pumps:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+class Subscription:
+    """A running subscription: its events land in a queue (``next``), its first frame is awaited by ``start``."""
+
+    def __init__(self, context, query: str, variables: dict) -> None:  # noqa: ANN001
+        import asyncio
+
+        self.context, self.query, self.variables = context, query, variables
+        self.events: asyncio.Queue = asyncio.Queue()
+        self.task: asyncio.Task | None = None
+
+    async def _run(self) -> None:
+        stream = await schema.subscribe(self.query, variable_values=self.variables, context_value=self.context)
+        if not hasattr(stream, "__aiter__"):
+            await self.events.put(stream)
+            return
+        async for result in stream:
+            await self.events.put(result)
+
+    async def start(self, group: str | None = None) -> "Subscription":
+        """Start it; with ``group``, wait until its consumer listens there (so a broadcast right after is not lost)."""
+        import asyncio
+
+        from channels.layers import get_channel_layer
+
+        self.task = asyncio.create_task(self._run())
+        if group is not None:
+            layer = get_channel_layer()
+            for _ in range(500):
+                if self.task.done():
+                    self.task.result()
+                    return self
+                if self.context.consumer.channel_name in layer.groups.get(group, {}):
+                    return self
+                await asyncio.sleep(0.01)
+            raise AssertionError(f"the subscription never joined {group}")
+        return self
+
+    async def next(self, timeout: float = 5):  # noqa: ANN201
+        """The next result; fails the test on GraphQL errors."""
+        import asyncio
+
+        result = await asyncio.wait_for(self.events.get(), timeout)
+        assert not result.errors, result.errors
+        return result.data
+
+    async def error(self, timeout: float = 5):  # noqa: ANN201
+        """The next result, which must be an error."""
+        import asyncio
+
+        result = await asyncio.wait_for(self.events.get(), timeout)
+        assert result.errors, result.data
+        return result.errors[0]
+
+    async def silent(self, wait: float = 0.3) -> bool:
+        """Nothing arrives for ``wait`` seconds."""
+        import asyncio
+
+        try:
+            await asyncio.wait_for(self.events.get(), wait)
+        except TimeoutError:
+            return True
+        return False
+
+    async def stop(self) -> None:
+        import asyncio
+        import contextlib
+
+        if self.task is not None:
+            self.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, BaseException):
+                await self.task
+
+
+@pytest.fixture
+async def subscribe(ws_contexts):
+    """Start a subscription as a static token; stopped after the test."""
+    started: list[Subscription] = []
+
+    async def _start(query: str, variables: dict | None = None, token: str = "test", group: str | None = None) -> Subscription:
+        subscription = await Subscription(await ws_contexts(token), query, variables or {}).start(group)
+        started.append(subscription)
+        return subscription
+
+    yield _start
+    for subscription in started:
+        await subscription.stop()
+
+
+@pytest.fixture
 def aexecute(authenticated_context):
     """Run a GraphQL document as tenant A (or ``context``); fails the test on GraphQL errors unless ``allow_errors``."""
 
