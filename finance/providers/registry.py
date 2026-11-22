@@ -33,7 +33,9 @@ def backend_for(provider: models.BankProvider) -> ProviderBackend:
 def usable(provider: models.BankProvider | None, what: str) -> ProviderBackend:
     """The backend of a provider that may be used for new work; :class:`NotConfigured` when there is none or it is disabled."""
     if provider is None:
-        raise NotConfigured(f"{what} has no provider: an admin has to set one up (again) before it can be used.")
+        raise NotConfigured(
+            f"{what} has no provider: an admin has to set one up (again) before it can be used."
+        )
     if not provider.enabled:
         raise NotConfigured(f"The provider {provider.name!r} is disabled.")
     return backend_for(provider)

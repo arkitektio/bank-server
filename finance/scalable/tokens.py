@@ -41,7 +41,9 @@ class Session:
 
 def read_secret(connection: models.BankConnection) -> dict:
     if not connection.secret:
-        raise ReloginRequired("This Scalable connection holds no credentials; link Scalable again.")
+        raise ReloginRequired(
+            "This Scalable connection holds no credentials; link Scalable again."
+        )
     return json.loads(crypto.decrypt(connection.secret))
 
 
@@ -58,10 +60,18 @@ def claim_value(token: str, name: str) -> str | None:
 def absorb(secret: dict, token: dict) -> tuple[dict, datetime, str | None]:
     """Fold a token response into the secret; returns (secret, access expiry, person id)."""
     access = token["access_token"]
-    secret = {**secret, "access": access, "refresh": token.get("refresh_token") or secret.get("refresh")}
+    secret = {
+        **secret,
+        "access": access,
+        "refresh": token.get("refresh_token") or secret.get("refresh"),
+    }
     secret["session_id"] = claim_value(access, "session_id") or secret.get("session_id")
     expires_in = int(token.get("expires_in") or 600)
-    return secret, timezone.now() + timedelta(seconds=expires_in), claim_value(access, "person_id")
+    return (
+        secret,
+        timezone.now() + timedelta(seconds=expires_in),
+        claim_value(access, "person_id"),
+    )
 
 
 def _claim(connection_id: int) -> bool:
@@ -74,28 +84,43 @@ def _claim(connection_id: int) -> bool:
 
 
 def _release(connection_id: int) -> None:
-    models.BankConnection.objects.filter(id=connection_id).update(token_lease_until=None)
+    models.BankConnection.objects.filter(id=connection_id).update(
+        token_lease_until=None
+    )
 
 
 def _store(connection_id: int, secret: dict, expires_at: datetime) -> None:
-    models.BankConnection.objects.filter(id=connection_id).update(secret=seal(secret), token_expires_at=expires_at)
+    models.BankConnection.objects.filter(id=connection_id).update(
+        secret=seal(secret), token_expires_at=expires_at
+    )
 
 
 def _fresh(connection: models.BankConnection) -> Session | None:
-    if connection.token_expires_at is None or connection.token_expires_at - MARGIN <= timezone.now():
+    if (
+        connection.token_expires_at is None
+        or connection.token_expires_at - MARGIN <= timezone.now()
+    ):
         return None
     secret = read_secret(connection)
-    return Session(secret["access"], DpopKey.from_pem(secret["dpop"]), connection.provider_user_id or "")
+    return Session(
+        secret["access"],
+        DpopKey.from_pem(secret["dpop"]),
+        connection.provider_user_id or "",
+    )
 
 
 def _invalidate(connection_id: int, access_token: str) -> None:
     """Mark the access token stale, unless another process already replaced it."""
     connection = models.BankConnection.objects.get(id=connection_id)
     if connection.secret and read_secret(connection).get("access") == access_token:
-        models.BankConnection.objects.filter(id=connection_id).update(token_expires_at=None)
+        models.BankConnection.objects.filter(id=connection_id).update(
+            token_expires_at=None
+        )
 
 
-async def refreshed_session(connection_id: int, client: ScalableClient, rejected: Session) -> Session:
+async def refreshed_session(
+    connection_id: int, client: ScalableClient, rejected: Session
+) -> Session:
     """A new session after GraphQL rejected ``rejected``'s access token (forces one refresh, still single-flight)."""
     await database_sync_to_async(_invalidate)(connection_id, rejected.access_token)
     return await session_for(connection_id, client)
@@ -107,7 +132,9 @@ async def session_for(connection_id: int, client: ScalableClient) -> Session:
     while True:
         connection = await models.BankConnection.objects.aget(id=connection_id)
         if connection.status != models.ConnectionStatus.ACTIVE:
-            raise ReloginRequired(f"The Scalable connection is {connection.status.lower()}; link Scalable again.")
+            raise ReloginRequired(
+                f"The Scalable connection is {connection.status.lower()}; link Scalable again."
+            )
         session = _fresh(connection)
         if session is not None:
             return session
@@ -120,12 +147,16 @@ async def session_for(connection_id: int, client: ScalableClient) -> Session:
                     return session
                 secret = read_secret(connection)
                 key = DpopKey.from_pem(secret["dpop"])
-                token = await client.refresh(key, secret["refresh"], secret.get("session_id"))
+                token = await client.refresh(
+                    key, secret["refresh"], secret.get("session_id")
+                )
                 secret, expires_at, _ = absorb(secret, token)
                 await database_sync_to_async(_store)(connection_id, secret, expires_at)
                 return Session(secret["access"], key, connection.provider_user_id or "")
             finally:
                 await database_sync_to_async(_release)(connection_id)
         if time.monotonic() > deadline:
-            raise ScalableError("Another process is refreshing the Scalable session; try again shortly.")
+            raise ScalableError(
+                "Another process is refreshing the Scalable session; try again shortly."
+            )
         await asyncio.sleep(0.1)

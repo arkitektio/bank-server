@@ -16,7 +16,16 @@ from finance import models
 Descriptors = dict[str, int | str | bool | list[str]]
 
 #: The transaction fields its describer reads: a bulk path that defers fields loads these.
-TRANSACTION_FIELDS = ("amount", "currency", "status", "kind", "is_transfer", "category", "merchant", "isin")
+TRANSACTION_FIELDS = (
+    "amount",
+    "currency",
+    "status",
+    "kind",
+    "is_transfer",
+    "category",
+    "merchant",
+    "isin",
+)
 
 
 def direction(amount: Decimal) -> str:
@@ -40,18 +49,27 @@ def provider_descriptors(provider: models.BankProvider) -> Descriptors:
     return {
         "@bank/provider": str(provider.kind),
         "@bank/enabled": provider.enabled,
-        "@bank/capabilities": sorted(str(capability) for capability in provider.capabilities or []),
+        "@bank/capabilities": sorted(
+            str(capability) for capability in provider.capabilities or []
+        ),
     }
 
 
 def account_descriptors(account: models.BankAccount) -> Descriptors:
     """An account's descriptors: what it holds, in which currency, and whether its IBAN is known."""
-    return {"@bank/kind": str(account.kind), "@bank/currency": account.currency or "", "@bank/has_iban": bool(account.iban)}
+    return {
+        "@bank/kind": str(account.kind),
+        "@bank/currency": account.currency or "",
+        "@bank/has_iban": bool(account.iban),
+    }
 
 
 def import_descriptors(statement: models.StatementImport) -> Descriptors:
     """A statement import's descriptors: where it is, and what it came from."""
-    return {"@bank/status": str(statement.status), "@bank/source": str(statement.source)}
+    return {
+        "@bank/status": str(statement.status),
+        "@bank/source": str(statement.source),
+    }
 
 
 def recurring_descriptors(recurring: models.RecurringPayment) -> Descriptors:

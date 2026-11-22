@@ -74,10 +74,18 @@ class Application:
 def endpoint() -> tuple[str, float]:
     """The deployment's Enable Banking endpoint: (base URL, request timeout)."""
     conf: dict[str, Any] = getattr(settings, "ENABLEBANKING", None) or {}
-    return conf.get("api_url", "https://api.enablebanking.com"), conf.get("timeout_seconds", 60)
+    return conf.get("api_url", "https://api.enablebanking.com"), conf.get(
+        "timeout_seconds", 60
+    )
 
 
-_EXPIRED_MARKERS = ("EXPIRED", "SESSION_DOES_NOT_EXIST", "CLOSED_SESSION", "REVOKED", "ACCESS_DENIED")
+_EXPIRED_MARKERS = (
+    "EXPIRED",
+    "SESSION_DOES_NOT_EXIST",
+    "CLOSED_SESSION",
+    "REVOKED",
+    "ACCESS_DENIED",
+)
 
 
 class EnableBankingClient:
@@ -90,7 +98,9 @@ class EnableBankingClient:
         self._token_exp = 0.0
 
     async def __aenter__(self) -> "EnableBankingClient":
-        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.config.timeout_seconds))
+        self._session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=self.config.timeout_seconds)
+        )
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -103,7 +113,12 @@ class EnableBankingClient:
         if self._token is None or now > self._token_exp - _TOKEN_MARGIN:
             iat = int(now)
             self._token = jwt.encode(
-                {"iss": "enablebanking.com", "aud": "api.enablebanking.com", "iat": iat, "exp": iat + _TOKEN_TTL},
+                {
+                    "iss": "enablebanking.com",
+                    "aud": "api.enablebanking.com",
+                    "iat": iat,
+                    "exp": iat + _TOKEN_TTL,
+                },
                 self.config.private_key,
                 algorithm="RS256",
                 headers={"kid": self.config.app_id},
@@ -111,31 +126,60 @@ class EnableBankingClient:
             self._token_exp = iat + _TOKEN_TTL
         return {"Authorization": f"Bearer {self._token}"}
 
-    async def _request(self, method: str, path: str, *, json: dict | None = None, params: dict | None = None, psu_headers: dict[str, str] | None = None) -> Any:
-        assert self._session is not None, "use `async with EnableBankingClient(config) as client`"
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict | None = None,
+        params: dict | None = None,
+        psu_headers: dict[str, str] | None = None,
+    ) -> Any:
+        assert self._session is not None, (
+            "use `async with EnableBankingClient(config) as client`"
+        )
         headers = {**self._auth_header(), **(psu_headers or {})}
         url = self.config.api_url.rstrip("/") + path
-        async with self._session.request(method, url, json=json, params=params, headers=headers) as response:
+        async with self._session.request(
+            method, url, json=json, params=params, headers=headers
+        ) as response:
             body = await response.text()
             if response.status < 400:
                 return await response.json(content_type=None) if body else None
         if response.status == 429:
             raise RateLimited(response.status, body, path)
-        if response.status in (401, 403, 404, 410, 422) and any(marker in body.upper() for marker in _EXPIRED_MARKERS):
+        if response.status in (401, 403, 404, 410, 422) and any(
+            marker in body.upper() for marker in _EXPIRED_MARKERS
+        ):
             raise ConsentExpired(response.status, body, path)
         raise EnableBankingError(response.status, body, path)
 
     async def application(self) -> Application:
         """The application this client's key belongs to; fails when the key or app id is not Enable Banking's."""
         data = await self._request("GET", "/application")
-        return Application(name=data.get("name"), environment=data.get("environment"), active=bool(data.get("active", True)), redirect_urls=list(data.get("redirect_urls") or []))
+        return Application(
+            name=data.get("name"),
+            environment=data.get("environment"),
+            active=bool(data.get("active", True)),
+            redirect_urls=list(data.get("redirect_urls") or []),
+        )
 
     async def aspsps(self, country: str | None = None) -> list[dict]:
         """The banks (ASPSPs) Enable Banking can reach, optionally in one country."""
-        data = await self._request("GET", "/aspsps", params={"country": country} if country else None)
+        data = await self._request(
+            "GET", "/aspsps", params={"country": country} if country else None
+        )
         return data.get("aspsps", [])
 
-    async def start_auth(self, *, aspsp_name: str, country: str, state: str, redirect_url: str, valid_until: str) -> dict:
+    async def start_auth(
+        self,
+        *,
+        aspsp_name: str,
+        country: str,
+        state: str,
+        redirect_url: str,
+        valid_until: str,
+    ) -> dict:
         """Start a consent; returns ``{"url": <bank login>, "authorization_id": ...}``."""
         return await self._request(
             "POST",
@@ -161,20 +205,36 @@ class EnableBankingClient:
         """Withdraw the consent at the bank."""
         await self._request("DELETE", f"/sessions/{session_id}")
 
-    async def transactions(self, account_uid: str, since: date | None, psu_headers: dict[str, str] | None = None) -> list[dict]:
+    async def transactions(
+        self,
+        account_uid: str,
+        since: date | None,
+        psu_headers: dict[str, str] | None = None,
+    ) -> list[dict]:
         """All transactions since a date, or as far back as the bank allows if ``since`` is None."""
-        base: dict[str, str] = {"date_from": since.isoformat()} if since else {"strategy": "longest"}
+        base: dict[str, str] = (
+            {"date_from": since.isoformat()} if since else {"strategy": "longest"}
+        )
         out: list[dict] = []
         params = base
         while True:
-            data = await self._request("GET", f"/accounts/{account_uid}/transactions", params=params, psu_headers=psu_headers)
+            data = await self._request(
+                "GET",
+                f"/accounts/{account_uid}/transactions",
+                params=params,
+                psu_headers=psu_headers,
+            )
             out.extend(data.get("transactions", []))
             key = data.get("continuation_key")
             if not key:
                 return out
             params = {**base, "continuation_key": key}
 
-    async def balances(self, account_uid: str, psu_headers: dict[str, str] | None = None) -> list[dict]:
+    async def balances(
+        self, account_uid: str, psu_headers: dict[str, str] | None = None
+    ) -> list[dict]:
         """The account's current balances, one per balance type."""
-        data = await self._request("GET", f"/accounts/{account_uid}/balances", psu_headers=psu_headers)
+        data = await self._request(
+            "GET", f"/accounts/{account_uid}/balances", psu_headers=psu_headers
+        )
         return data.get("balances", [])

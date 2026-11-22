@@ -1,5 +1,5 @@
 from .settings import *  # noqa
-from .settings import AUTHENTIKATE, BANK_SYNC, DATABASES, DATALAYER
+from .settings import AUTHENTIKATE, DATABASES, DATALAYER
 import logging
 import os
 

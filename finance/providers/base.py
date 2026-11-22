@@ -37,16 +37,42 @@ class CapabilityInfo:
 CAPABILITIES: dict[models.ProviderCapability, CapabilityInfo] = {
     info.capability: info
     for info in (
-        CapabilityInfo(models.ProviderCapability.TRANSACTIONS, "Transactions", "Fetch and store the accounts' transactions."),
-        CapabilityInfo(models.ProviderCapability.BALANCES, "Balances", "Store the balance the provider reports on every sync."),
-        CapabilityInfo(models.ProviderCapability.HOLDINGS, "Holdings", "Store a depot's positions on every sync."),
-        CapabilityInfo(models.ProviderCapability.PRICES, "Security prices", "Use the provider's logins as a source of security prices."),
-        CapabilityInfo(models.ProviderCapability.SCHEDULED_SYNC, "Scheduled sync", "Let the unattended `sync_all_accounts` action sync its accounts; off, they only sync when a user asks."),
+        CapabilityInfo(
+            models.ProviderCapability.TRANSACTIONS,
+            "Transactions",
+            "Fetch and store the accounts' transactions.",
+        ),
+        CapabilityInfo(
+            models.ProviderCapability.BALANCES,
+            "Balances",
+            "Store the balance the provider reports on every sync.",
+        ),
+        CapabilityInfo(
+            models.ProviderCapability.HOLDINGS,
+            "Holdings",
+            "Store a depot's positions on every sync.",
+        ),
+        CapabilityInfo(
+            models.ProviderCapability.PRICES,
+            "Security prices",
+            "Use the provider's logins as a source of security prices.",
+        ),
+        CapabilityInfo(
+            models.ProviderCapability.SCHEDULED_SYNC,
+            "Scheduled sync",
+            "Let the unattended `sync_all_accounts` action sync its accounts; off, they only sync when a user asks.",
+        ),
     )
 }
 
 #: The capabilities that put data into an account; a provider with none of them has nothing to sync.
-DATA_CAPABILITIES = frozenset({models.ProviderCapability.TRANSACTIONS, models.ProviderCapability.BALANCES, models.ProviderCapability.HOLDINGS})
+DATA_CAPABILITIES = frozenset(
+    {
+        models.ProviderCapability.TRANSACTIONS,
+        models.ProviderCapability.BALANCES,
+        models.ProviderCapability.HOLDINGS,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -152,11 +178,15 @@ class ProviderBackend(Protocol):
         """The banks that can be linked in a country (empty for a kind without institutions)."""
         ...
 
-    async def start_link(self, organization: "Organization", creator: "User", request: LinkRequest) -> models.BankConnection:
+    async def start_link(
+        self, organization: "Organization", creator: "User", request: LinkRequest
+    ) -> models.BankConnection:
         """Start a login; returns the stored PENDING connection."""
         ...
 
-    async def complete_link(self, connection: models.BankConnection, completion: LinkCompletion) -> models.BankConnection:
+    async def complete_link(
+        self, connection: models.BankConnection, completion: LinkCompletion
+    ) -> models.BankConnection:
         """Finish (REDIRECT) or advance (POLL) the PENDING login of ``connection``; returns the row as it is afterwards.
 
         A login the provider definitely ended is stored as FAILED and returned, not raised. Only
@@ -173,7 +203,12 @@ class ProviderBackend(Protocol):
         """The auth session of a pending connection of this kind, read from the stored row."""
         ...
 
-    async def sync(self, syncer: models.AccountSyncer, since: date | None, psu_headers: PsuHeaders | None) -> "SyncResult":
+    async def sync(
+        self,
+        syncer: models.AccountSyncer,
+        since: date | None,
+        psu_headers: PsuHeaders | None,
+    ) -> "SyncResult":
         """Fetch one syncer and store it (the caller holds the lease and records failures)."""
         ...
 
@@ -185,7 +220,12 @@ class BackendBase:
 
     def __init__(self, provider: models.BankProvider) -> None:
         self.provider = provider
-        self._enabled = frozenset(models.ProviderCapability(value) for value in provider.capabilities) & self.capabilities
+        self._enabled = (
+            frozenset(
+                models.ProviderCapability(value) for value in provider.capabilities
+            )
+            & self.capabilities
+        )
 
     def has(self, capability: models.ProviderCapability) -> bool:
         """Whether this instance has ``capability`` switched on."""

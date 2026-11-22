@@ -18,7 +18,7 @@ these rows alone.
 """
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.db import transaction as db_transaction
@@ -26,9 +26,9 @@ from django.utils import timezone
 
 from embeddings.models import EMBEDDING_FIELDS
 from finance import models
-from finance.semantic import embed_rows
 from finance.scalable.client import ScalableClient
 from finance.scalable.tokens import Session
+from finance.semantic import embed_rows
 
 PAGE_SIZE = 50
 MAX_PAGES = 200
@@ -54,7 +54,21 @@ TRANSFER_KINDS = {
     "REINVESTMENT",
 }
 
-FIELDS = ["booking_date", "value_date", "transaction_date", "amount", "currency", "status", "counterparty", "remittance", "entry_reference", "kind", "isin", "quantity", "raw"]
+FIELDS = [
+    "booking_date",
+    "value_date",
+    "transaction_date",
+    "amount",
+    "currency",
+    "status",
+    "counterparty",
+    "remittance",
+    "entry_reference",
+    "kind",
+    "isin",
+    "quantity",
+    "raw",
+]
 
 
 #: Every part a fetch can bring.
@@ -94,7 +108,11 @@ def kind_of(tx: dict) -> str:
             value = models.TransactionKind.CORPORATE_ACTION
     else:
         value = tx.get("cashTransactionType")
-    return value if value in models.TransactionKind.values else models.TransactionKind.OTHER
+    return (
+        value
+        if value in models.TransactionKind.values
+        else models.TransactionKind.OTHER
+    )
 
 
 def normalize(tx: dict) -> dict:
@@ -108,7 +126,11 @@ def normalize(tx: dict) -> dict:
         "transaction_date": day,
         "amount": _decimal(tx.get("amount")) or Decimal("0"),
         "currency": tx.get("currency") or "EUR",
-        "status": models.TransactionStatus.BOOKED if status in BOOKED else models.TransactionStatus.PENDING if status in PENDING else models.TransactionStatus.OTHER,
+        "status": models.TransactionStatus.BOOKED
+        if status in BOOKED
+        else models.TransactionStatus.PENDING
+        if status in PENDING
+        else models.TransactionStatus.OTHER,
         "counterparty": tx.get("description") or None,
         "remittance": None,
         "entry_reference": tx["id"],
@@ -134,7 +156,13 @@ async def _page_back(fetch_page, since: date | None) -> list[dict]:  # noqa: ANN
     return out
 
 
-async def fetch(syncer: models.AccountSyncer, session: Session, client: ScalableClient, since: date | None, want: frozenset[models.ProviderCapability] = ALL) -> Fetched:
+async def fetch(
+    syncer: models.AccountSyncer,
+    session: Session,
+    client: ScalableClient,
+    since: date | None,
+    want: frozenset[models.ProviderCapability] = ALL,
+) -> Fetched:
     """What this syncer's pot shows at Scalable, of the parts in ``want`` (nothing else is asked for)."""
     person = session.person_id
     kind = syncer.account.kind
@@ -142,42 +170,89 @@ async def fetch(syncer: models.AccountSyncer, session: Session, client: Scalable
     balances = models.ProviderCapability.BALANCES in want
 
     async def gql(operation: str, variables: dict) -> dict:
-        return await client.graphql(session.key, session.access_token, operation, variables)
+        return await client.graphql(
+            session.key, session.access_token, operation, variables
+        )
 
     if kind == models.AccountKind.SAVINGS:
         ids = {"accountId": person, "savingsAccountId": syncer.remote_id}
 
         async def savings_page(cursor: str | None) -> dict:
-            data = await gql("OvernightTransactions", {**ids, "input": {"pageSize": PAGE_SIZE, "cursor": cursor}})
-            return ((data.get("account") or {}).get("savingsAccount") or {}).get("moreTransactions") or {}
+            data = await gql(
+                "OvernightTransactions",
+                {**ids, "input": {"pageSize": PAGE_SIZE, "cursor": cursor}},
+            )
+            return ((data.get("account") or {}).get("savingsAccount") or {}).get(
+                "moreTransactions"
+            ) or {}
 
         total = None
         if balances:
             summary = await gql("OvernightSummary", ids)
-            total = ((summary.get("account") or {}).get("savingsAccount") or {}).get("totalAmount")
-        return Fetched(transactions=await _page_back(savings_page, since) if transactions else [], balance=_decimal(total))
+            total = ((summary.get("account") or {}).get("savingsAccount") or {}).get(
+                "totalAmount"
+            )
+        return Fetched(
+            transactions=await _page_back(savings_page, since) if transactions else [],
+            balance=_decimal(total),
+        )
 
     ids = {"accountId": person, "portfolioId": syncer.remote_id}
     if kind == models.AccountKind.DEPOT:
         invested = items = None
         if balances:
             overview = await gql("BrokerOverview", {**ids, "includeYearToDate": False})
-            valuation = ((overview.get("account") or {}).get("brokerPortfolio") or {}).get("valuation") or {}
-            invested = (_decimal(valuation.get("securitiesValuation")) or Decimal(0)) + (_decimal(valuation.get("cryptoValuation")) or Decimal(0))
+            valuation = (
+                (overview.get("account") or {}).get("brokerPortfolio") or {}
+            ).get("valuation") or {}
+            invested = (
+                _decimal(valuation.get("securitiesValuation")) or Decimal(0)
+            ) + (_decimal(valuation.get("cryptoValuation")) or Decimal(0))
         if models.ProviderCapability.HOLDINGS in want:
-            holdings = await gql("BrokerHoldings", {**ids, "includeYearToDate": False, "quoteSource": None})
-            items = (((holdings.get("account") or {}).get("brokerPortfolio") or {}).get("inventory") or {}).get("items") or []
+            holdings = await gql(
+                "BrokerHoldings",
+                {**ids, "includeYearToDate": False, "quoteSource": None},
+            )
+            items = (
+                ((holdings.get("account") or {}).get("brokerPortfolio") or {}).get(
+                    "inventory"
+                )
+                or {}
+            ).get("items") or []
         return Fetched(balance=invested, balance_type="VALU", holdings=items)
 
     async def broker_page(cursor: str | None) -> dict:
-        data = await gql("BrokerTransactions", {**ids, "input": {"pageSize": PAGE_SIZE, "cursor": cursor, "includeReinvestmentSubtypes": True}})
-        return ((data.get("account") or {}).get("brokerPortfolio") or {}).get("moreTransactions") or {}
+        data = await gql(
+            "BrokerTransactions",
+            {
+                **ids,
+                "input": {
+                    "pageSize": PAGE_SIZE,
+                    "cursor": cursor,
+                    "includeReinvestmentSubtypes": True,
+                },
+            },
+        )
+        return ((data.get("account") or {}).get("brokerPortfolio") or {}).get(
+            "moreTransactions"
+        ) or {}
 
     cash = None
     if balances:
         limits = await gql("BrokerLimits", ids)
-        cash = ((((limits.get("account") or {}).get("brokerPortfolio") or {}).get("payments") or {}).get("buyingPower") or {}).get("cashBalance")
-    return Fetched(transactions=await _page_back(broker_page, since) if transactions else [], balance=_decimal(cash))
+        cash = (
+            (
+                ((limits.get("account") or {}).get("brokerPortfolio") or {}).get(
+                    "payments"
+                )
+                or {}
+            ).get("buyingPower")
+            or {}
+        ).get("cashBalance")
+    return Fetched(
+        transactions=await _page_back(broker_page, since) if transactions else [],
+        balance=_decimal(cash),
+    )
 
 
 def _holding(item: dict) -> dict | None:
@@ -193,7 +268,9 @@ def _holding(item: dict) -> dict | None:
         "quantity": quantity,
         "fifo_price": _decimal(position.get("fifoPrice")),
         "price": _decimal(quote.get("midPrice")),
-        "valuation": (_decimal(performance.get("valuation")) or Decimal(0)).quantize(Decimal("0.01")),
+        "valuation": (_decimal(performance.get("valuation")) or Decimal(0)).quantize(
+            Decimal("0.01")
+        ),
         "currency": performance.get("currency") or quote.get("currency") or "EUR",
         "raw": item,
     }
@@ -208,23 +285,50 @@ def persist(syncer_id: int, fetched: Fetched, result) -> None:  # noqa: ANN001 -
     today = now.date()
     syncer = models.AccountSyncer.objects.get(id=syncer_id)
     with db_transaction.atomic():
-        account = models.BankAccount.objects.select_for_update().get(id=syncer.account_id)
+        account = models.BankAccount.objects.select_for_update().get(
+            id=syncer.account_id
+        )
 
-        rows = {f"sc:{tx['id']}": normalize(tx) for tx in fetched.transactions if tx.get("id")}
-        existing = {tx.fingerprint: tx for tx in account.transactions.filter(fingerprint__in=list(rows))}
-        imported = take_over_imported(account, [(fp, row) for fp, row in rows.items() if fp not in existing])
+        rows = {
+            f"sc:{tx['id']}": normalize(tx)
+            for tx in fetched.transactions
+            if tx.get("id")
+        }
+        existing = {
+            tx.fingerprint: tx
+            for tx in account.transactions.filter(fingerprint__in=list(rows))
+        }
+        imported = take_over_imported(
+            account, [(fp, row) for fp, row in rows.items() if fp not in existing]
+        )
         to_create, to_update = [], []
         for fingerprint, row in rows.items():
             transfer = row["kind"] in TRANSFER_KINDS
             tx = existing.get(fingerprint) or imported.get(fingerprint)
             if tx is None:
-                to_create.append(models.Transaction(account=account, syncer=syncer, fingerprint=fingerprint, is_transfer=transfer, **row))
+                to_create.append(
+                    models.Transaction(
+                        account=account,
+                        syncer=syncer,
+                        fingerprint=fingerprint,
+                        is_transfer=transfer,
+                        **row,
+                    )
+                )
                 continue
-            changed = fingerprint in imported or tx.syncer_id != syncer.id or any(getattr(tx, name) != row[name] for name in FIELDS)
+            changed = (
+                fingerprint in imported
+                or tx.syncer_id != syncer.id
+                or any(getattr(tx, name) != row[name] for name in FIELDS)
+            )
             if changed or (not tx.is_transfer_manual and tx.is_transfer != transfer):
                 for name in FIELDS:
                     setattr(tx, name, row[name])
-                tx.fingerprint, tx.syncer, tx.origin = fingerprint, syncer, models.TransactionOrigin.SYNC
+                tx.fingerprint, tx.syncer, tx.origin = (
+                    fingerprint,
+                    syncer,
+                    models.TransactionOrigin.SYNC,
+                )
                 if not tx.is_transfer_manual:
                     tx.is_transfer = transfer
                 tx.updated_at = now
@@ -233,21 +337,46 @@ def persist(syncer_id: int, fetched: Fetched, result) -> None:  # noqa: ANN001 -
         # No pre_save sees a bulk write: the rows are described before they are written.
         models.Transaction.objects.bulk_create(service.stamp(to_create))
         models.Transaction.objects.bulk_update(
-            service.stamp(to_update), FIELDS + ["fingerprint", "syncer", "origin", "is_transfer", "updated_at", "stored_descriptors", *EMBEDDING_FIELDS], batch_size=500
+            service.stamp(to_update),
+            FIELDS
+            + [
+                "fingerprint",
+                "syncer",
+                "origin",
+                "is_transfer",
+                "updated_at",
+                "stored_descriptors",
+                *EMBEDDING_FIELDS,
+            ],
+            batch_size=500,
         )
         result.created, result.updated = len(to_create), len(to_update)
 
         if fetched.balance is not None:
             models.BalanceSnapshot.objects.update_or_create(
-                account=account, date=today, balance_type=fetched.balance_type, defaults={"amount": fetched.balance.quantize(Decimal("0.01")), "currency": fetched.currency}
+                account=account,
+                date=today,
+                balance_type=fetched.balance_type,
+                defaults={
+                    "amount": fetched.balance.quantize(Decimal("0.01")),
+                    "currency": fetched.currency,
+                },
             )
             result.balances = 1
 
         if fetched.holdings is not None:
-            positions = {item["isin"]: holding for item in fetched.holdings if item.get("isin") and (holding := _holding(item))}
-            account.holdings.filter(date=today).exclude(isin__in=list(positions)).delete()
+            positions = {
+                item["isin"]: holding
+                for item in fetched.holdings
+                if item.get("isin") and (holding := _holding(item))
+            }
+            account.holdings.filter(date=today).exclude(
+                isin__in=list(positions)
+            ).delete()
             for isin, values in positions.items():
-                models.HoldingSnapshot.objects.update_or_create(account=account, date=today, isin=isin, defaults=values)
+                models.HoldingSnapshot.objects.update_or_create(
+                    account=account, date=today, isin=isin, defaults=values
+                )
             result.holdings = len(positions)
 
         touched = [tx.id for tx in to_create + to_update]

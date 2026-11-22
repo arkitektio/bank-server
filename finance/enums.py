@@ -26,7 +26,9 @@ class Provider(str, Enum):
     SCALABLE = "SCALABLE"
 
 
-@strawberry.enum(description="Something a provider kind can do, switched on or off per provider (see `providerKinds`).")
+@strawberry.enum(
+    description="Something a provider kind can do, switched on or off per provider (see `providerKinds`)."
+)
 class ProviderCapability(str, Enum):
     TRANSACTIONS = "TRANSACTIONS"
     BALANCES = "BALANCES"
@@ -35,21 +37,27 @@ class ProviderCapability(str, Enum):
     SCHEDULED_SYNC = "SCHEDULED_SYNC"
 
 
-@strawberry.enum(description="What an account holds. A DEPOT's balance is its market valuation; its positions are `holdings`.")
+@strawberry.enum(
+    description="What an account holds. A DEPOT's balance is its market valuation; its positions are `holdings`."
+)
 class AccountKind(str, Enum):
     CASH = "CASH"
     DEPOT = "DEPOT"
     SAVINGS = "SAVINGS"
 
 
-@strawberry.enum(description="Where a Scalable link is: waiting for the login code to be approved, then for the second factor.")
+@strawberry.enum(
+    description="Where a Scalable link is: waiting for the login code to be approved, then for the second factor."
+)
 class LinkStep(str, Enum):
     DEVICE = "DEVICE"
     MFA = "MFA"
     DONE = "DONE"
 
 
-@strawberry.enum(description="What went wrong, so a client can offer the fix: CONSENT_EXPIRED → relink, RATE_LIMITED → try again at nextSyncAllowedAt, MFA_REJECTED → log in again, CODE_EXPIRED → get a new code, INVALID_STATE → start over, BANK_UNAVAILABLE → try later. Also every GraphQL error's `extensions.code`.")
+@strawberry.enum(
+    description="What went wrong, so a client can offer the fix: CONSENT_EXPIRED → relink, RATE_LIMITED → try again at nextSyncAllowedAt, MFA_REJECTED → log in again, CODE_EXPIRED → get a new code, INVALID_STATE → start over, BANK_UNAVAILABLE → try later. Also every GraphQL error's `extensions.code`."
+)
 class BankErrorCode(str, Enum):
     CONSENT_EXPIRED = "CONSENT_EXPIRED"
     RATE_LIMITED = "RATE_LIMITED"
@@ -64,7 +72,9 @@ class BankErrorCode(str, Enum):
     LOGIN_REFUSED = "LOGIN_REFUSED"
 
 
-@strawberry.enum(description="A provider's transaction type (Scalable's broker and savings types). OTHER is a type this service does not know yet.")
+@strawberry.enum(
+    description="A provider's transaction type (Scalable's broker and savings types). OTHER is a type this service does not know yet."
+)
 class TransactionKind(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
@@ -114,13 +124,17 @@ class TransactionStatus(str, Enum):
     OTHER = "OTHR"
 
 
-@strawberry.enum(description="Where a transaction's bank fields came from: a syncer (SYNC), or a file import (IMPORT) — a sync that finds the same booking later takes an IMPORT row over, keeping its category and note.")
+@strawberry.enum(
+    description="Where a transaction's bank fields came from: a syncer (SYNC), or a file import (IMPORT) — a sync that finds the same booking later takes an IMPORT row over, keeping its category and note."
+)
 class TransactionOrigin(str, Enum):
     SYNC = "SYNC"
     IMPORT = "IMPORT"
 
 
-@strawberry.enum(description="Who set a transaction's category: a rule, a user (MANUAL — nothing overrides it), or SEMANTIC (similar categorized transactions or a category term agreed; rules and users override it).")
+@strawberry.enum(
+    description="Who set a transaction's category: a rule, a user (MANUAL — nothing overrides it), or SEMANTIC (similar categorized transactions or a category term agreed; rules and users override it)."
+)
 class CategorySource(str, Enum):
     NONE = "NONE"
     RULE = "RULE"
@@ -130,7 +144,9 @@ class CategorySource(str, Enum):
     MERCHANT = "MERCHANT"
 
 
-@strawberry.enum(description="Whether a category holds expenses, income, or transfers between own accounts (excluded from stats).")
+@strawberry.enum(
+    description="Whether a category holds expenses, income, or transfers between own accounts (excluded from stats)."
+)
 class CategoryKind(str, Enum):
     EXPENSE = "EXPENSE"
     INCOME = "INCOME"
@@ -158,7 +174,9 @@ class RuleDirection(str, Enum):
     IN = "IN"
 
 
-@strawberry.enum(description="Whether a user confirmed or ignored a detected recurring payment. Only CONFIRMED ones feed forecasts by default.")
+@strawberry.enum(
+    description="Whether a user confirmed or ignored a detected recurring payment. Only CONFIRMED ones feed forecasts by default."
+)
 class RecurringStatus(str, Enum):
     DETECTED = "DETECTED"
     CONFIRMED = "CONFIRMED"
@@ -184,7 +202,9 @@ class SuggestionReason(str, Enum):
     BOTH = "BOTH"
 
 
-@strawberry.enum(description="How a transaction got its merchant: a merchant rule (RULE) or an alias (AUTO) — both re-matched when rules or aliases change — or a user (MANUAL, never re-matched).")
+@strawberry.enum(
+    description="How a transaction got its merchant: a merchant rule (RULE) or an alias (AUTO) — both re-matched when rules or aliases change — or a user (MANUAL, never re-matched)."
+)
 class MerchantSource(str, Enum):
     NONE = "NONE"
     AUTO = "AUTO"
@@ -192,7 +212,9 @@ class MerchantSource(str, Enum):
     MANUAL = "MANUAL"
 
 
-@strawberry.enum(description="Where a merchant location came from: a store number on a bank line (DISCOVERED, no address yet), a user (MANUAL) or the geocoder (GEOCODED).")
+@strawberry.enum(
+    description="Where a merchant location came from: a store number on a bank line (DISCOVERED, no address yet), a user (MANUAL) or the geocoder (GEOCODED)."
+)
 class LocationSource(str, Enum):
     DISCOVERED = "DISCOVERED"
     MANUAL = "MANUAL"
@@ -213,9 +235,10 @@ class StatMetric(str, Enum):
     NET = "NET"
 
 
-@strawberry.enum(description="Where security prices come from: SCALABLE (the organization's Scalable login), TWELVEDATA (API key), YAHOO (unofficial, no key).")
+@strawberry.enum(
+    description="Where security prices come from: SCALABLE (the organization's Scalable login), TWELVEDATA (API key), YAHOO (unofficial, no key)."
+)
 class PriceSource(str, Enum):
     SCALABLE = "SCALABLE"
     TWELVEDATA = "TWELVEDATA"
     YAHOO = "YAHOO"
-

@@ -8,15 +8,19 @@ Money is always a ``Decimal`` with an explicit currency — never a float. Amoun
 are signed: negative is money out, positive money in.
 """
 
-from django.db import models
+from arkitekt_service.service.described import Described
 from authentikate.models import Organization, User
+from django.contrib.postgres.indexes import GinIndex, GistIndex
+from django.db import models
 from koherent.fields import ProvenanceField
 
-from arkitekt_service.service.described import Described
-from django.contrib.postgres.indexes import GinIndex, GistIndex
-
-from embeddings.models import EMBEDDING_FIELDS, EmbeddedDescriptionMixin, embedding_indexes
+from embeddings.models import (
+    EMBEDDING_FIELDS,
+    EmbeddedDescriptionMixin,
+    embedding_indexes,
+)
 from finance.geo import GeographyPointField, MakePoint
+
 
 def money(**kwargs) -> models.DecimalField:
     """A money column: two decimal places, up to 16 before the point."""
@@ -28,7 +32,10 @@ class ConnectionStatus(models.TextChoices):
 
     PENDING = "PENDING", "Waiting for the user to approve at the bank"
     ACTIVE = "ACTIVE", "Consent granted; accounts can be synced"
-    EXPIRED = "EXPIRED", "Consent ran out or was withdrawn at the bank; relink to continue"
+    EXPIRED = (
+        "EXPIRED",
+        "Consent ran out or was withdrawn at the bank; relink to continue",
+    )
     REVOKED = "REVOKED", "Revoked by a user of this service"
     FAILED = "FAILED", "The link was never completed"
     CANCELLED = "CANCELLED", "The user dropped the login before it was finished"
@@ -38,7 +45,10 @@ class Provider(models.TextChoices):
     """Who a connection reaches its accounts through."""
 
     ENABLEBANKING = "ENABLEBANKING", "A PSD2 bank consent via Enable Banking"
-    SCALABLE = "SCALABLE", "A Scalable Capital broker login via Scalable's official CLI API"
+    SCALABLE = (
+        "SCALABLE",
+        "A Scalable Capital broker login via Scalable's official CLI API",
+    )
 
 
 class ProviderCapability(models.TextChoices):
@@ -48,7 +58,10 @@ class ProviderCapability(models.TextChoices):
     BALANCES = "BALANCES", "Store the balance the provider reports on every sync"
     HOLDINGS = "HOLDINGS", "Store a depot's positions on every sync"
     PRICES = "PRICES", "Use the provider's logins as a source of security prices"
-    SCHEDULED_SYNC = "SCHEDULED_SYNC", "Let the unattended sync action sync its accounts"
+    SCHEDULED_SYNC = (
+        "SCHEDULED_SYNC",
+        "Let the unattended sync action sync its accounts",
+    )
 
 
 class AccountKind(models.TextChoices):
@@ -72,15 +85,30 @@ class BankErrorCode(models.TextChoices):
 
     CONSENT_EXPIRED = "CONSENT_EXPIRED", "The consent or login is gone; relink"
     RATE_LIMITED = "RATE_LIMITED", "The provider's limit is reached; try again later"
-    MFA_REJECTED = "MFA_REJECTED", "The login or its second factor was denied; log in again"
+    MFA_REJECTED = (
+        "MFA_REJECTED",
+        "The login or its second factor was denied; log in again",
+    )
     CODE_EXPIRED = "CODE_EXPIRED", "The login code or link ran out; get a new one"
-    INVALID_STATE = "INVALID_STATE", "No such pending link (other login attempt, already used, other organization); start over"
-    BANK_UNAVAILABLE = "BANK_UNAVAILABLE", "The provider could not be reached or failed; try later"
+    INVALID_STATE = (
+        "INVALID_STATE",
+        "No such pending link (other login attempt, already used, other organization); start over",
+    )
+    BANK_UNAVAILABLE = (
+        "BANK_UNAVAILABLE",
+        "The provider could not be reached or failed; try later",
+    )
     BANK_ERROR = "BANK_ERROR", "The provider refused the request"
-    CONNECTION_INACTIVE = "CONNECTION_INACTIVE", "The connection is revoked, failed or still pending"
+    CONNECTION_INACTIVE = (
+        "CONNECTION_INACTIVE",
+        "The connection is revoked, failed or still pending",
+    )
     SYNC_IN_PROGRESS = "SYNC_IN_PROGRESS", "Another sync holds the account right now"
     NOT_CONFIGURED = "NOT_CONFIGURED", "This server has no credentials for the provider"
-    LOGIN_REFUSED = "LOGIN_REFUSED", "The provider refused the login (the user cancelled there, or the bank said no); start over"
+    LOGIN_REFUSED = (
+        "LOGIN_REFUSED",
+        "The provider refused the login (the user cancelled there, or the bank said no); start over",
+    )
 
 
 class TransactionKind(models.TextChoices):
@@ -124,7 +152,10 @@ class TransactionOrigin(models.TextChoices):
     """Where a transaction's bank fields came from."""
 
     SYNC = "SYNC", "Pulled by a syncer from the provider"
-    IMPORT = "IMPORT", "Imported from a file; a sync that finds the same booking takes it over"
+    IMPORT = (
+        "IMPORT",
+        "Imported from a file; a sync that finds the same booking takes it over",
+    )
 
 
 class CategorySource(models.TextChoices):
@@ -133,16 +164,28 @@ class CategorySource(models.TextChoices):
     NONE = "NONE", "Uncategorized"
     RULE = "RULE", "Set by a rule"
     MANUAL = "MANUAL", "Set by a user; rules never touch it"
-    SEMANTIC = "SEMANTIC", "Set because similar, already categorized transactions agreed; rules and users override it"
-    IMPORT = "IMPORT", "Taken from an imported statement (through the import's category mapping); rules never touch it"
-    MERCHANT = "MERCHANT", "The merchant's default category; rules and users override it, it overrides semantic guesses"
+    SEMANTIC = (
+        "SEMANTIC",
+        "Set because similar, already categorized transactions agreed; rules and users override it",
+    )
+    IMPORT = (
+        "IMPORT",
+        "Taken from an imported statement (through the import's category mapping); rules never touch it",
+    )
+    MERCHANT = (
+        "MERCHANT",
+        "The merchant's default category; rules and users override it, it overrides semantic guesses",
+    )
 
 
 class MerchantSource(models.TextChoices):
     """How a transaction got its merchant."""
 
     NONE = "NONE", "No merchant"
-    AUTO = "AUTO", "Matched by one of the merchant's aliases; re-matched when aliases change"
+    AUTO = (
+        "AUTO",
+        "Matched by one of the merchant's aliases; re-matched when aliases change",
+    )
     RULE = "RULE", "Set by a merchant rule; re-matched when rules change"
     MANUAL = "MANUAL", "Set by a user; matching never touches it"
 
@@ -150,7 +193,10 @@ class MerchantSource(models.TextChoices):
 class LocationSource(models.TextChoices):
     """Where a merchant location came from."""
 
-    DISCOVERED = "DISCOVERED", "Created from a store number on a bank line; address unknown until filled in"
+    DISCOVERED = (
+        "DISCOVERED",
+        "Created from a store number on a bank line; address unknown until filled in",
+    )
     MANUAL = "MANUAL", "Entered by a user"
     GEOCODED = "GEOCODED", "Address and coordinates looked up with the geocoder"
 
@@ -190,13 +236,19 @@ class RuleDirection(models.TextChoices):
 class ImportSource(models.TextChoices):
     """Which app or format a statement import came from."""
 
-    FINANZGURU = "FINANZGURU", "A Finanzguru transaction export (xlsx, or the same columns as CSV)"
+    FINANZGURU = (
+        "FINANZGURU",
+        "A Finanzguru transaction export (xlsx, or the same columns as CSV)",
+    )
 
 
 class ImportStatus(models.TextChoices):
     """Where a statement import is."""
 
-    PREVIEWED = "PREVIEWED", "Parsed and matched against the accounts; nothing written yet"
+    PREVIEWED = (
+        "PREVIEWED",
+        "Parsed and matched against the accounts; nothing written yet",
+    )
     APPLIED = "APPLIED", "Written into the accounts"
     FAILED = "FAILED", "The file could not be read"
 
@@ -218,24 +270,71 @@ class BankProvider(Described):
     ``settings`` and reads ``capabilities``; a kind needing other settings needs no migration.
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_providers", help_text="The organization this provider belongs to.")
-    creator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="bank_providers", help_text="The admin who set it up.")
-    kind = models.CharField(max_length=20, choices=Provider.choices, help_text="Which provider this is an instance of.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_providers",
+        help_text="The organization this provider belongs to.",
+    )
+    creator = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bank_providers",
+        help_text="The admin who set it up.",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=Provider.choices,
+        help_text="Which provider this is an instance of.",
+    )
     name = models.CharField(max_length=200, help_text="What the organization calls it.")
-    enabled = models.BooleanField(default=True, help_text="A disabled provider starts no links and syncs nothing; its consents can still be revoked.")
-    capabilities = models.JSONField(default=list, blank=True, help_text="The ProviderCapability values switched on, a subset of what the kind can do.")
-    settings = models.JSONField(default=dict, blank=True, help_text="The kind's non-secret settings (Enable Banking: application id, redirect URLs, consent days).")
-    secret = models.TextField(null=True, blank=True, help_text="Encrypted credentials of the kind (Enable Banking: the application's private key). Never exposed.")
-    daily_sync_limit = models.PositiveIntegerField(null=True, blank=True, help_text="Syncs per account per UTC day before the service stops asking the provider; null is unlimited.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the provider was set up.")
-    updated_at = models.DateTimeField(auto_now=True, help_text="When it was last changed.")
+    enabled = models.BooleanField(
+        default=True,
+        help_text="A disabled provider starts no links and syncs nothing; its consents can still be revoked.",
+    )
+    capabilities = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="The ProviderCapability values switched on, a subset of what the kind can do.",
+    )
+    settings = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="The kind's non-secret settings (Enable Banking: application id, redirect URLs, consent days).",
+    )
+    secret = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Encrypted credentials of the kind (Enable Banking: the application's private key). Never exposed.",
+    )
+    daily_sync_limit = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Syncs per account per UTC day before the service stops asking the provider; null is unlimited.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the provider was set up."
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True, help_text="When it was last changed."
+    )
     provenance = ProvenanceField(excluded_fields=["secret"])
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["organization", "name"], name="bank_provider_org_name"),
+            models.UniqueConstraint(
+                fields=["organization", "name"], name="bank_provider_org_name"
+            ),
         ]
-        indexes = [GinIndex(fields=["stored_descriptors"], name="bank_prov_desc_gin", opclasses=["jsonb_path_ops"])]
+        indexes = [
+            GinIndex(
+                fields=["stored_descriptors"],
+                name="bank_prov_desc_gin",
+                opclasses=["jsonb_path_ops"],
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.name} [{self.kind}]"
@@ -248,36 +347,149 @@ class BankConnection(Described):
     token bound to it — Fernet-encrypted in ``secret`` (see :mod:`finance.crypto`).
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_connections", help_text="The organization this connection belongs to.")
-    creator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="bank_connections", help_text="The user who started the link.")
-    aspsp_name = models.CharField(max_length=1000, help_text="The bank's name, exactly as Enable Banking lists it.")
-    aspsp_country = models.CharField(max_length=2, help_text="The bank's ISO country code.")
-    state = models.CharField(max_length=100, unique=True, help_text="Opaque value tying the bank's redirect back to this link attempt.")
-    redirect_url = models.CharField(max_length=2000, help_text="Where the bank redirects after approval.")
-    status = models.CharField(max_length=20, choices=ConnectionStatus.choices, default=ConnectionStatus.PENDING, help_text="Where this consent is in its lifecycle.")
-    session_id = models.CharField(max_length=200, null=True, blank=True, unique=True, help_text="The Enable Banking session id, once linked.")
-    valid_until = models.DateTimeField(null=True, blank=True, help_text="When the bank consent runs out.")
-    pending_expires_at = models.DateTimeField(help_text="A link not completed by then is refused.")
-    last_error = models.TextField(null=True, blank=True, help_text="The last error talking to the bank, if any.")
-    last_error_code = models.CharField(max_length=30, null=True, blank=True, help_text="The machine-readable kind of ``last_error`` (a BankErrorCode).")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the link was started.")
-    linked_at = models.DateTimeField(null=True, blank=True, help_text="When the link was completed.")
-    raw = models.JSONField(default=dict, blank=True, help_text="The session as Enable Banking returned it.")
-    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.ENABLEBANKING, help_text="The kind of provider the accounts are reached through.")
-    bank_provider = models.ForeignKey(BankProvider, on_delete=models.SET_NULL, null=True, blank=True, related_name="connections", help_text="The organization's provider this consent was made through; null until it is attached to one.")
-    secret = models.TextField(null=True, blank=True, help_text="Encrypted provider credentials (Scalable: DPoP key and tokens). Never exposed.")
-    provider_user_id = models.CharField(max_length=200, null=True, blank=True, help_text="The user's id at the provider (Scalable: the person id).")
-    token_expires_at = models.DateTimeField(null=True, blank=True, help_text="When the stored access token runs out (Scalable).")
-    token_lease_until = models.DateTimeField(null=True, blank=True, help_text="Held by a token refresh until then, so one replica rotates the refresh token at a time.")
-    link_step = models.CharField(max_length=10, choices=LinkStep.choices, null=True, blank=True, help_text="Where a Scalable link is in its login.")
-    link_poll_interval = models.PositiveIntegerField(default=5, help_text="Seconds between polls of the device authorization, as the provider asks.")
-    link_next_poll_at = models.DateTimeField(null=True, blank=True, help_text="The device authorization is not polled again before this.")
-    link_mfa_session_id = models.CharField(max_length=200, null=True, blank=True, help_text="The pending second-factor challenge of a Scalable link.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_connections",
+        help_text="The organization this connection belongs to.",
+    )
+    creator = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bank_connections",
+        help_text="The user who started the link.",
+    )
+    aspsp_name = models.CharField(
+        max_length=1000,
+        help_text="The bank's name, exactly as Enable Banking lists it.",
+    )
+    aspsp_country = models.CharField(
+        max_length=2, help_text="The bank's ISO country code."
+    )
+    state = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text="Opaque value tying the bank's redirect back to this link attempt.",
+    )
+    redirect_url = models.CharField(
+        max_length=2000, help_text="Where the bank redirects after approval."
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=ConnectionStatus.choices,
+        default=ConnectionStatus.PENDING,
+        help_text="Where this consent is in its lifecycle.",
+    )
+    session_id = models.CharField(
+        max_length=200,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="The Enable Banking session id, once linked.",
+    )
+    valid_until = models.DateTimeField(
+        null=True, blank=True, help_text="When the bank consent runs out."
+    )
+    pending_expires_at = models.DateTimeField(
+        help_text="A link not completed by then is refused."
+    )
+    last_error = models.TextField(
+        null=True, blank=True, help_text="The last error talking to the bank, if any."
+    )
+    last_error_code = models.CharField(
+        max_length=30,
+        null=True,
+        blank=True,
+        help_text="The machine-readable kind of ``last_error`` (a BankErrorCode).",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the link was started."
+    )
+    linked_at = models.DateTimeField(
+        null=True, blank=True, help_text="When the link was completed."
+    )
+    raw = models.JSONField(
+        default=dict, blank=True, help_text="The session as Enable Banking returned it."
+    )
+    provider = models.CharField(
+        max_length=20,
+        choices=Provider.choices,
+        default=Provider.ENABLEBANKING,
+        help_text="The kind of provider the accounts are reached through.",
+    )
+    bank_provider = models.ForeignKey(
+        BankProvider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="connections",
+        help_text="The organization's provider this consent was made through; null until it is attached to one.",
+    )
+    secret = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Encrypted provider credentials (Scalable: DPoP key and tokens). Never exposed.",
+    )
+    provider_user_id = models.CharField(
+        max_length=200,
+        null=True,
+        blank=True,
+        help_text="The user's id at the provider (Scalable: the person id).",
+    )
+    token_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the stored access token runs out (Scalable).",
+    )
+    token_lease_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Held by a token refresh until then, so one replica rotates the refresh token at a time.",
+    )
+    link_step = models.CharField(
+        max_length=10,
+        choices=LinkStep.choices,
+        null=True,
+        blank=True,
+        help_text="Where a Scalable link is in its login.",
+    )
+    link_poll_interval = models.PositiveIntegerField(
+        default=5,
+        help_text="Seconds between polls of the device authorization, as the provider asks.",
+    )
+    link_next_poll_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="The device authorization is not polled again before this.",
+    )
+    link_mfa_session_id = models.CharField(
+        max_length=200,
+        null=True,
+        blank=True,
+        help_text="The pending second-factor challenge of a Scalable link.",
+    )
     # Credentials and polling state rotate constantly and must not pile up in history rows.
-    provenance = ProvenanceField(excluded_fields=["secret", "token_expires_at", "token_lease_until", "link_poll_interval", "link_next_poll_at", "link_mfa_session_id"])
+    provenance = ProvenanceField(
+        excluded_fields=[
+            "secret",
+            "token_expires_at",
+            "token_lease_until",
+            "link_poll_interval",
+            "link_next_poll_at",
+            "link_mfa_session_id",
+        ]
+    )
 
     class Meta:
-        indexes = [GinIndex(fields=["stored_descriptors"], name="bank_conn_desc_gin", opclasses=["jsonb_path_ops"])]
+        indexes = [
+            GinIndex(
+                fields=["stored_descriptors"],
+                name="bank_conn_desc_gin",
+                opclasses=["jsonb_path_ops"],
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.aspsp_name} ({self.aspsp_country}) [{self.status}]"
@@ -298,25 +510,75 @@ class BankAccount(Described):
     IBAN — so the history, categories and notes stay.
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_accounts", help_text="The organization this account belongs to.")
-    iban = models.CharField(max_length=64, null=True, blank=True, help_text="The account's IBAN, if known.")
-    iban_normalized = models.CharField(max_length=64, null=True, blank=True, help_text="The IBAN without spaces, upper-cased: what accounts are matched by.")
-    import_key = models.CharField(max_length=500, null=True, blank=True, help_text="How an import identified an account that has no IBAN (``fg:<Referenzkonto>``).")
-    name = models.CharField(max_length=1000, null=True, blank=True, help_text="The account's name at the bank.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_accounts",
+        help_text="The organization this account belongs to.",
+    )
+    iban = models.CharField(
+        max_length=64, null=True, blank=True, help_text="The account's IBAN, if known."
+    )
+    iban_normalized = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="The IBAN without spaces, upper-cased: what accounts are matched by.",
+    )
+    import_key = models.CharField(
+        max_length=500,
+        null=True,
+        blank=True,
+        help_text="How an import identified an account that has no IBAN (``fg:<Referenzkonto>``).",
+    )
+    name = models.CharField(
+        max_length=1000,
+        null=True,
+        blank=True,
+        help_text="The account's name at the bank.",
+    )
     currency = models.CharField(max_length=3, help_text="The account's ISO currency.")
-    product = models.CharField(max_length=1000, null=True, blank=True, help_text="The bank's product name for the account.")
-    kind = models.CharField(max_length=10, choices=AccountKind.choices, default=AccountKind.CASH, help_text="Cash, securities depot, or savings.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the account was first seen.")
+    product = models.CharField(
+        max_length=1000,
+        null=True,
+        blank=True,
+        help_text="The bank's product name for the account.",
+    )
+    kind = models.CharField(
+        max_length=10,
+        choices=AccountKind.choices,
+        default=AccountKind.CASH,
+        help_text="Cash, securities depot, or savings.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the account was first seen."
+    )
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["organization", "import_key"], condition=models.Q(import_key__isnull=False), name="bank_acct_org_import_key"),
+            models.UniqueConstraint(
+                fields=["organization", "import_key"],
+                condition=models.Q(import_key__isnull=False),
+                name="bank_acct_org_import_key",
+            ),
         ]
-        indexes = [models.Index(fields=["organization", "iban_normalized"], name="bank_acct_org_iban"), GinIndex(fields=["stored_descriptors"], name="bank_acct_desc_gin", opclasses=["jsonb_path_ops"])]
+        indexes = [
+            models.Index(
+                fields=["organization", "iban_normalized"], name="bank_acct_org_iban"
+            ),
+            GinIndex(
+                fields=["stored_descriptors"],
+                name="bank_acct_desc_gin",
+                opclasses=["jsonb_path_ops"],
+            ),
+        ]
 
     def save(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
         self.iban_normalized = normalize_iban(self.iban)
-        if kwargs.get("update_fields") is not None and "iban" in kwargs["update_fields"]:
+        if (
+            kwargs.get("update_fields") is not None
+            and "iban" in kwargs["update_fields"]
+        ):
             kwargs["update_fields"] = {*kwargs["update_fields"], "iban_normalized"}
         super().save(*args, **kwargs)
 
@@ -333,25 +595,80 @@ class AccountSyncer(models.Model):
     the provider, not to the account.
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_syncers", help_text="The organization this syncer belongs to.")
-    account = models.ForeignKey(BankAccount, on_delete=models.CASCADE, related_name="syncers", help_text="The account it feeds.")
-    connection = models.ForeignKey(BankConnection, on_delete=models.SET_NULL, null=True, blank=True, related_name="syncers", help_text="The consent or login it is currently reached through.")
-    backend = models.CharField(max_length=20, choices=Provider.choices, help_text="Which provider it pulls from.")
-    remote_id = models.CharField(max_length=200, help_text="The account's id at the provider within the current connection (EB: the session's account uid; Scalable: the portfolio or savings id).")
-    identification_key = models.CharField(max_length=500, help_text="Stable identity at the provider across connections.")
-    raw = models.JSONField(default=dict, blank=True, help_text="The account as the provider returned it.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the syncer was first linked.")
-    last_synced_at = models.DateTimeField(null=True, blank=True, help_text="When the last successful sync finished.")
-    sync_lease_until = models.DateTimeField(null=True, blank=True, help_text="Held by a running sync until then; a crashed sync frees it once passed.")
-    sync_day = models.DateField(null=True, blank=True, help_text="The UTC day ``syncs_today`` refers to.")
-    syncs_today = models.PositiveIntegerField(default=0, help_text="Syncs that reached the provider on ``sync_day`` (a provider's daily limit counts these).")
-    rate_limited_until = models.DateTimeField(null=True, blank=True, help_text="The provider rate-limited this syncer; no sync is attempted before then.")
-    last_error = models.TextField(null=True, blank=True, help_text="Why the last sync failed, if it did.")
-    last_error_code = models.CharField(max_length=30, null=True, blank=True, help_text="The machine-readable kind of ``last_error`` (a BankErrorCode).")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_syncers",
+        help_text="The organization this syncer belongs to.",
+    )
+    account = models.ForeignKey(
+        BankAccount,
+        on_delete=models.CASCADE,
+        related_name="syncers",
+        help_text="The account it feeds.",
+    )
+    connection = models.ForeignKey(
+        BankConnection,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="syncers",
+        help_text="The consent or login it is currently reached through.",
+    )
+    backend = models.CharField(
+        max_length=20,
+        choices=Provider.choices,
+        help_text="Which provider it pulls from.",
+    )
+    remote_id = models.CharField(
+        max_length=200,
+        help_text="The account's id at the provider within the current connection (EB: the session's account uid; Scalable: the portfolio or savings id).",
+    )
+    identification_key = models.CharField(
+        max_length=500, help_text="Stable identity at the provider across connections."
+    )
+    raw = models.JSONField(
+        default=dict, blank=True, help_text="The account as the provider returned it."
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the syncer was first linked."
+    )
+    last_synced_at = models.DateTimeField(
+        null=True, blank=True, help_text="When the last successful sync finished."
+    )
+    sync_lease_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Held by a running sync until then; a crashed sync frees it once passed.",
+    )
+    sync_day = models.DateField(
+        null=True, blank=True, help_text="The UTC day ``syncs_today`` refers to."
+    )
+    syncs_today = models.PositiveIntegerField(
+        default=0,
+        help_text="Syncs that reached the provider on ``sync_day`` (a provider's daily limit counts these).",
+    )
+    rate_limited_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="The provider rate-limited this syncer; no sync is attempted before then.",
+    )
+    last_error = models.TextField(
+        null=True, blank=True, help_text="Why the last sync failed, if it did."
+    )
+    last_error_code = models.CharField(
+        max_length=30,
+        null=True,
+        blank=True,
+        help_text="The machine-readable kind of ``last_error`` (a BankErrorCode).",
+    )
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["organization", "backend", "identification_key"], name="bank_sync_org_backend_ident"),
+            models.UniqueConstraint(
+                fields=["organization", "backend", "identification_key"],
+                name="bank_sync_org_backend_ident",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -368,15 +685,53 @@ class Category(EmbeddedDescriptionMixin, Described):
     right category (:mod:`finance.semantic`).
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_categories", help_text="The organization this category belongs to.")
-    name = models.CharField(max_length=200, help_text="The category's name, unique among its siblings.")
-    parent = models.ForeignKey("self", on_delete=models.CASCADE, null=True, blank=True, related_name="children", help_text="The parent category, if nested.")
-    color = models.CharField(max_length=20, null=True, blank=True, help_text="A display color (e.g. ``#4f46e5``).")
-    kind = models.CharField(max_length=20, choices=CategoryKind.choices, default=CategoryKind.EXPENSE, help_text="Whether money in this category is an expense, income, or a transfer between own accounts. Always the root's kind.")
-    key = models.CharField(max_length=100, null=True, blank=True, help_text="The base-taxonomy key (``food.groceries``) of a base category; null for the organization's own.")
-    description = models.TextField(blank=True, default="", help_text="What belongs here, in words a bank line would use. Embedded with the name for suggestions.")
-    hidden = models.BooleanField(default=False, help_text="Hidden from pickers, suggestions and automatic assignment; its transactions keep it.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the category was created.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_categories",
+        help_text="The organization this category belongs to.",
+    )
+    name = models.CharField(
+        max_length=200, help_text="The category's name, unique among its siblings."
+    )
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="children",
+        help_text="The parent category, if nested.",
+    )
+    color = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="A display color (e.g. ``#4f46e5``).",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=CategoryKind.choices,
+        default=CategoryKind.EXPENSE,
+        help_text="Whether money in this category is an expense, income, or a transfer between own accounts. Always the root's kind.",
+    )
+    key = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="The base-taxonomy key (``food.groceries``) of a base category; null for the organization's own.",
+    )
+    description = models.TextField(
+        blank=True,
+        default="",
+        help_text="What belongs here, in words a bank line would use. Embedded with the name for suggestions.",
+    )
+    hidden = models.BooleanField(
+        default=False,
+        help_text="Hidden from pickers, suggestions and automatic assignment; its transactions keep it.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the category was created."
+    )
     # The vector rotates with every text edit and model change: keep it out of the history rows.
     provenance = ProvenanceField(excluded_fields=list(EMBEDDING_FIELDS))
 
@@ -384,10 +739,25 @@ class Category(EmbeddedDescriptionMixin, Described):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["organization", "parent", "name"], name="bank_cat_org_parent_name", nulls_distinct=False),
-            models.UniqueConstraint(fields=["organization", "key"], condition=models.Q(key__isnull=False), name="bank_cat_org_key"),
+            models.UniqueConstraint(
+                fields=["organization", "parent", "name"],
+                name="bank_cat_org_parent_name",
+                nulls_distinct=False,
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "key"],
+                condition=models.Q(key__isnull=False),
+                name="bank_cat_org_key",
+            ),
         ]
-        indexes = [*embedding_indexes("bank_cat"), GinIndex(fields=["stored_descriptors"], name="bank_cat_desc_gin", opclasses=["jsonb_path_ops"])]
+        indexes = [
+            *embedding_indexes("bank_cat"),
+            GinIndex(
+                fields=["stored_descriptors"],
+                name="bank_cat_desc_gin",
+                opclasses=["jsonb_path_ops"],
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name
@@ -429,14 +799,25 @@ class CategoryTerm(EmbeddedDescriptionMixin, models.Model):
     words. Rebuilt whenever the category's name or description changes.
     """
 
-    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name="terms", help_text="The category.")
-    text = models.CharField(max_length=300, help_text="The phrase, as written in the name or description.")
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name="terms",
+        help_text="The category.",
+    )
+    text = models.CharField(
+        max_length=300, help_text="The phrase, as written in the name or description."
+    )
 
     embedding_source_fields = ("text",)
     embedding_organization_path = "category__organization"
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["category", "text"], name="bank_term_cat_text")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["category", "text"], name="bank_term_cat_text"
+            )
+        ]
         indexes = [*embedding_indexes("bank_term")]
 
     def __str__(self) -> str:
@@ -451,12 +832,23 @@ class CategoryTerm(EmbeddedDescriptionMixin, models.Model):
 class DismissedBaseCategory(models.Model):
     """A base category the organization deleted: seeding does not bring it back."""
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_dismissed_categories", help_text="The organization.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_dismissed_categories",
+        help_text="The organization.",
+    )
     key = models.CharField(max_length=100, help_text="The dismissed base-taxonomy key.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When it was dismissed.")
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When it was dismissed."
+    )
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["organization", "key"], name="bank_dismissed_org_key")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "key"], name="bank_dismissed_org_key"
+            )
+        ]
 
     def __str__(self) -> str:
         return self.key
@@ -465,17 +857,55 @@ class DismissedBaseCategory(models.Model):
 class CategoryRule(models.Model):
     """Assigns a category to matching transactions on import (never to manually categorized ones)."""
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_rules", help_text="The organization this rule belongs to.")
-    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name="rules", help_text="The category matching transactions get.")
-    priority = models.IntegerField(default=100, help_text="Lower runs first; the first matching rule wins.")
-    field = models.CharField(max_length=20, choices=RuleField.choices, help_text="The transaction field the pattern is matched against.")
-    match = models.CharField(max_length=20, choices=RuleMatch.choices, default=RuleMatch.CONTAINS, help_text="How the pattern is compared (case-insensitive).")
-    pattern = models.CharField(max_length=1000, help_text="The text or regular expression to match.")
-    direction = models.CharField(max_length=10, choices=RuleDirection.choices, default=RuleDirection.ANY, help_text="Only match money in, money out, or both.")
-    amount_min = money(null=True, blank=True, help_text="Only match when the absolute amount is at least this.")
-    amount_max = money(null=True, blank=True, help_text="Only match when the absolute amount is at most this.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_rules",
+        help_text="The organization this rule belongs to.",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name="rules",
+        help_text="The category matching transactions get.",
+    )
+    priority = models.IntegerField(
+        default=100, help_text="Lower runs first; the first matching rule wins."
+    )
+    field = models.CharField(
+        max_length=20,
+        choices=RuleField.choices,
+        help_text="The transaction field the pattern is matched against.",
+    )
+    match = models.CharField(
+        max_length=20,
+        choices=RuleMatch.choices,
+        default=RuleMatch.CONTAINS,
+        help_text="How the pattern is compared (case-insensitive).",
+    )
+    pattern = models.CharField(
+        max_length=1000, help_text="The text or regular expression to match."
+    )
+    direction = models.CharField(
+        max_length=10,
+        choices=RuleDirection.choices,
+        default=RuleDirection.ANY,
+        help_text="Only match money in, money out, or both.",
+    )
+    amount_min = money(
+        null=True,
+        blank=True,
+        help_text="Only match when the absolute amount is at least this.",
+    )
+    amount_max = money(
+        null=True,
+        blank=True,
+        help_text="Only match when the absolute amount is at most this.",
+    )
     active = models.BooleanField(default=True, help_text="Inactive rules are skipped.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the rule was created.")
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the rule was created."
+    )
     provenance = ProvenanceField()
 
     def __str__(self) -> str:
@@ -490,20 +920,69 @@ class StatementImport(Described):
     a row already imported (by its ``import_ref``) is updated, never duplicated.
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_imports", help_text="The organization this import belongs to.")
-    creator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="bank_imports", help_text="The user who uploaded the file.")
-    source = models.CharField(max_length=20, choices=ImportSource.choices, default=ImportSource.FINANZGURU, help_text="Which app or format the file came from.")
-    file = models.ForeignKey("datalayer.BigFileStore", on_delete=models.SET_NULL, null=True, blank=True, related_name="bank_imports", help_text="The uploaded file (null for an import of a local file by the management command).")
-    file_name = models.CharField(max_length=1000, null=True, blank=True, help_text="The file's name as uploaded.")
-    status = models.CharField(max_length=20, choices=ImportStatus.choices, default=ImportStatus.PREVIEWED, help_text="Previewed, applied, or failed.")
-    report = models.JSONField(default=dict, blank=True, help_text="What the import found and did: per source account its target and counts, unmapped categories, warnings.")
-    error = models.TextField(null=True, blank=True, help_text="Why the file could not be read, if it could not.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the file was previewed.")
-    applied_at = models.DateTimeField(null=True, blank=True, help_text="When the import was (last) applied.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_imports",
+        help_text="The organization this import belongs to.",
+    )
+    creator = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bank_imports",
+        help_text="The user who uploaded the file.",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=ImportSource.choices,
+        default=ImportSource.FINANZGURU,
+        help_text="Which app or format the file came from.",
+    )
+    file = models.ForeignKey(
+        "datalayer.BigFileStore",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bank_imports",
+        help_text="The uploaded file (null for an import of a local file by the management command).",
+    )
+    file_name = models.CharField(
+        max_length=1000, null=True, blank=True, help_text="The file's name as uploaded."
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=ImportStatus.choices,
+        default=ImportStatus.PREVIEWED,
+        help_text="Previewed, applied, or failed.",
+    )
+    report = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="What the import found and did: per source account its target and counts, unmapped categories, warnings.",
+    )
+    error = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Why the file could not be read, if it could not.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the file was previewed."
+    )
+    applied_at = models.DateTimeField(
+        null=True, blank=True, help_text="When the import was (last) applied."
+    )
     provenance = ProvenanceField()
 
     class Meta:
-        indexes = [GinIndex(fields=["stored_descriptors"], name="bank_imp_desc_gin", opclasses=["jsonb_path_ops"])]
+        indexes = [
+            GinIndex(
+                fields=["stored_descriptors"],
+                name="bank_imp_desc_gin",
+                opclasses=["jsonb_path_ops"],
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.source} import {self.pk} [{self.status}]"
@@ -517,17 +996,52 @@ class ImportCategoryMapping(models.Model):
     ``category`` leaves such rows to rules and suggestions.
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_import_mappings", help_text="The organization this mapping belongs to.")
-    source = models.CharField(max_length=20, choices=ImportSource.choices, default=ImportSource.FINANZGURU, help_text="The app whose categories this maps.")
-    main = models.CharField(max_length=200, help_text="The app's main category (Finanzguru: Analyse-Hauptkategorie).")
-    sub = models.CharField(max_length=200, blank=True, default="", help_text="The app's subcategory (Finanzguru: Analyse-Unterkategorie); empty if none.")
-    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True, related_name="import_mappings", help_text="The category rows with this pair get; null leaves them to rules and suggestions.")
-    proposed = models.BooleanField(default=True, help_text="Still the automatic proposal; false once a user set it.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the pair was first seen.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_import_mappings",
+        help_text="The organization this mapping belongs to.",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=ImportSource.choices,
+        default=ImportSource.FINANZGURU,
+        help_text="The app whose categories this maps.",
+    )
+    main = models.CharField(
+        max_length=200,
+        help_text="The app's main category (Finanzguru: Analyse-Hauptkategorie).",
+    )
+    sub = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text="The app's subcategory (Finanzguru: Analyse-Unterkategorie); empty if none.",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="import_mappings",
+        help_text="The category rows with this pair get; null leaves them to rules and suggestions.",
+    )
+    proposed = models.BooleanField(
+        default=True,
+        help_text="Still the automatic proposal; false once a user set it.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the pair was first seen."
+    )
     provenance = ProvenanceField()
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["organization", "source", "main", "sub"], name="bank_impmap_org_src_pair")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "source", "main", "sub"],
+                name="bank_impmap_org_src_pair",
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.main} / {self.sub} → {self.category_id}"
@@ -548,38 +1062,165 @@ class Transaction(EmbeddedDescriptionMixin, Described):
     (:mod:`finance.matching`), keeping its category, note and ``import_raw``.
     """
 
-    account = models.ForeignKey(BankAccount, on_delete=models.CASCADE, related_name="transactions", help_text="The account the transaction is on.")
-    fingerprint = models.CharField(max_length=200, help_text="Stable identity across syncs: the bank's entry reference, else a content hash plus an occurrence index.")
-    booking_date = models.DateField(null=True, blank=True, help_text="When the bank booked it.")
-    value_date = models.DateField(null=True, blank=True, help_text="When it took effect for interest.")
-    transaction_date = models.DateField(null=True, blank=True, help_text="When it was made (e.g. the card payment).")
+    account = models.ForeignKey(
+        BankAccount,
+        on_delete=models.CASCADE,
+        related_name="transactions",
+        help_text="The account the transaction is on.",
+    )
+    fingerprint = models.CharField(
+        max_length=200,
+        help_text="Stable identity across syncs: the bank's entry reference, else a content hash plus an occurrence index.",
+    )
+    booking_date = models.DateField(
+        null=True, blank=True, help_text="When the bank booked it."
+    )
+    value_date = models.DateField(
+        null=True, blank=True, help_text="When it took effect for interest."
+    )
+    transaction_date = models.DateField(
+        null=True, blank=True, help_text="When it was made (e.g. the card payment)."
+    )
     amount = money(help_text="Signed amount: negative is money out.")
     currency = models.CharField(max_length=3, help_text="ISO currency of the amount.")
-    status = models.CharField(max_length=4, choices=TransactionStatus.choices, default=TransactionStatus.BOOKED, help_text="Booked or pending.")
-    counterparty = models.CharField(max_length=1000, null=True, blank=True, help_text="Who was paid, or who paid.")
-    counterparty_iban = models.CharField(max_length=64, null=True, blank=True, help_text="The counterparty's IBAN, if reported.")
-    remittance = models.TextField(null=True, blank=True, help_text="The remittance information (purpose line).")
-    entry_reference = models.CharField(max_length=200, null=True, blank=True, help_text="The bank's own reference, when it sends one.")
-    kind = models.CharField(max_length=40, choices=TransactionKind.choices, null=True, blank=True, help_text="The provider's transaction type (Scalable: BUY, SELL, DEPOSIT, DISTRIBUTION, …); null for bank transactions.")
-    isin = models.CharField(max_length=12, null=True, blank=True, help_text="The security traded or paying out, if any.")
-    quantity = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True, help_text="Units of the security, if any.")
-    raw = models.JSONField(default=dict, blank=True, help_text="The transaction as the provider returned it.")
-    origin = models.CharField(max_length=10, choices=TransactionOrigin.choices, default=TransactionOrigin.SYNC, help_text="Whether the bank fields were synced or imported.")
-    syncer = models.ForeignKey(AccountSyncer, on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions", help_text="The syncer that last wrote the bank fields (null for imported rows).")
-    statement_import = models.ForeignKey(StatementImport, on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions", help_text="The import that last brought this booking in (kept when a sync takes the row over).")
-    import_ref = models.CharField(max_length=200, null=True, blank=True, help_text="The booking's id in the imported file (``fg:<Buchungs-ID>``): what makes re-importing the same file idempotent.")
-    import_raw = models.JSONField(default=dict, blank=True, help_text="What the import knew beyond the bank fields (the app's analysis: type, contract, tags, split parts). Survives a sync taking the row over.")
-    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions", help_text="The transaction's category.")
-    category_source = models.CharField(max_length=10, choices=CategorySource.choices, default=CategorySource.NONE, help_text="Who set the category; rules never override a manual one.")
+    status = models.CharField(
+        max_length=4,
+        choices=TransactionStatus.choices,
+        default=TransactionStatus.BOOKED,
+        help_text="Booked or pending.",
+    )
+    counterparty = models.CharField(
+        max_length=1000, null=True, blank=True, help_text="Who was paid, or who paid."
+    )
+    counterparty_iban = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="The counterparty's IBAN, if reported.",
+    )
+    remittance = models.TextField(
+        null=True, blank=True, help_text="The remittance information (purpose line)."
+    )
+    entry_reference = models.CharField(
+        max_length=200,
+        null=True,
+        blank=True,
+        help_text="The bank's own reference, when it sends one.",
+    )
+    kind = models.CharField(
+        max_length=40,
+        choices=TransactionKind.choices,
+        null=True,
+        blank=True,
+        help_text="The provider's transaction type (Scalable: BUY, SELL, DEPOSIT, DISTRIBUTION, …); null for bank transactions.",
+    )
+    isin = models.CharField(
+        max_length=12,
+        null=True,
+        blank=True,
+        help_text="The security traded or paying out, if any.",
+    )
+    quantity = models.DecimalField(
+        max_digits=24,
+        decimal_places=8,
+        null=True,
+        blank=True,
+        help_text="Units of the security, if any.",
+    )
+    raw = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="The transaction as the provider returned it.",
+    )
+    origin = models.CharField(
+        max_length=10,
+        choices=TransactionOrigin.choices,
+        default=TransactionOrigin.SYNC,
+        help_text="Whether the bank fields were synced or imported.",
+    )
+    syncer = models.ForeignKey(
+        AccountSyncer,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transactions",
+        help_text="The syncer that last wrote the bank fields (null for imported rows).",
+    )
+    statement_import = models.ForeignKey(
+        StatementImport,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transactions",
+        help_text="The import that last brought this booking in (kept when a sync takes the row over).",
+    )
+    import_ref = models.CharField(
+        max_length=200,
+        null=True,
+        blank=True,
+        help_text="The booking's id in the imported file (``fg:<Buchungs-ID>``): what makes re-importing the same file idempotent.",
+    )
+    import_raw = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="What the import knew beyond the bank fields (the app's analysis: type, contract, tags, split parts). Survives a sync taking the row over.",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transactions",
+        help_text="The transaction's category.",
+    )
+    category_source = models.CharField(
+        max_length=10,
+        choices=CategorySource.choices,
+        default=CategorySource.NONE,
+        help_text="Who set the category; rules never override a manual one.",
+    )
     note = models.TextField(null=True, blank=True, help_text="A user's note.")
-    is_transfer = models.BooleanField(default=False, help_text="Money moved between own accounts; excluded from stats.")
-    is_transfer_manual = models.BooleanField(default=False, help_text="``is_transfer`` was set by a user and is not recomputed.")
-    merchant = models.ForeignKey("Merchant", on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions", help_text="Who the transaction was with.")
-    merchant_location = models.ForeignKey("MerchantLocation", on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions", help_text="Where: the merchant's store, when the line names one.")
-    merchant_source = models.CharField(max_length=10, choices=MerchantSource.choices, default=MerchantSource.NONE, help_text="How the merchant was set; matching never overrides MANUAL.")
-    merchant_context = models.TextField(blank=True, default="", help_text="What the merchant and place add to the embedding (name, short description, default category, place name, city); kept in step by finance.merchants.refresh_context.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When this service first saw the transaction.")
-    updated_at = models.DateTimeField(auto_now=True, help_text="When the row last changed.")
+    is_transfer = models.BooleanField(
+        default=False,
+        help_text="Money moved between own accounts; excluded from stats.",
+    )
+    is_transfer_manual = models.BooleanField(
+        default=False,
+        help_text="``is_transfer`` was set by a user and is not recomputed.",
+    )
+    merchant = models.ForeignKey(
+        "Merchant",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transactions",
+        help_text="Who the transaction was with.",
+    )
+    merchant_location = models.ForeignKey(
+        "MerchantLocation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transactions",
+        help_text="Where: the merchant's store, when the line names one.",
+    )
+    merchant_source = models.CharField(
+        max_length=10,
+        choices=MerchantSource.choices,
+        default=MerchantSource.NONE,
+        help_text="How the merchant was set; matching never overrides MANUAL.",
+    )
+    merchant_context = models.TextField(
+        blank=True,
+        default="",
+        help_text="What the merchant and place add to the embedding (name, short description, default category, place name, city); kept in step by finance.merchants.refresh_context.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When this service first saw the transaction."
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True, help_text="When the row last changed."
+    )
 
     embedding_source_fields = ("counterparty", "remittance", "kind", "merchant_context")
     embedding_organization_path = "account__organization"
@@ -588,19 +1229,31 @@ class Transaction(EmbeddedDescriptionMixin, Described):
         """The bank line (normalized) plus its merchant context (see :mod:`finance.textnorm`)."""
         from finance.textnorm import transaction_text
 
-        return transaction_text(self.counterparty, self.remittance, self.kind, self.merchant_context)
+        return transaction_text(
+            self.counterparty, self.remittance, self.kind, self.merchant_context
+        )
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["account", "fingerprint"], name="bank_tx_acct_fp_uniq"),
-            models.UniqueConstraint(fields=["account", "import_ref"], condition=models.Q(import_ref__isnull=False), name="bank_tx_acct_import_ref"),
+            models.UniqueConstraint(
+                fields=["account", "fingerprint"], name="bank_tx_acct_fp_uniq"
+            ),
+            models.UniqueConstraint(
+                fields=["account", "import_ref"],
+                condition=models.Q(import_ref__isnull=False),
+                name="bank_tx_acct_import_ref",
+            ),
         ]
         indexes = [
             *embedding_indexes("bank_tx"),
             models.Index(fields=["account", "booking_date"], name="bank_tx_acct_date"),
             models.Index(fields=["category"], name="bank_tx_category"),
             models.Index(fields=["syncer", "booking_date"], name="bank_tx_syncer_date"),
-            GinIndex(fields=["stored_descriptors"], name="bank_tx_desc_gin", opclasses=["jsonb_path_ops"]),
+            GinIndex(
+                fields=["stored_descriptors"],
+                name="bank_tx_desc_gin",
+                opclasses=["jsonb_path_ops"],
+            ),
         ]
 
     def __str__(self) -> str:
@@ -610,16 +1263,29 @@ class Transaction(EmbeddedDescriptionMixin, Described):
 class BalanceSnapshot(models.Model):
     """An account balance as the bank reported it on a day."""
 
-    account = models.ForeignKey(BankAccount, on_delete=models.CASCADE, related_name="balances", help_text="The account.")
+    account = models.ForeignKey(
+        BankAccount,
+        on_delete=models.CASCADE,
+        related_name="balances",
+        help_text="The account.",
+    )
     date = models.DateField(help_text="The day the balance refers to.")
-    balance_type = models.CharField(max_length=10, help_text="The ISO 20022 balance type (CLBD closing booked, ITAV interim available, …).")
+    balance_type = models.CharField(
+        max_length=10,
+        help_text="The ISO 20022 balance type (CLBD closing booked, ITAV interim available, …).",
+    )
     amount = money(help_text="The balance.")
     currency = models.CharField(max_length=3, help_text="ISO currency of the balance.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the snapshot was taken.")
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the snapshot was taken."
+    )
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["account", "date", "balance_type"], name="bank_bal_acct_date_type"),
+            models.UniqueConstraint(
+                fields=["account", "date", "balance_type"],
+                name="bank_bal_acct_date_type",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -629,23 +1295,55 @@ class BalanceSnapshot(models.Model):
 class HoldingSnapshot(models.Model):
     """One security position in a depot, as it stood on a day. One row per day and ISIN gives the history."""
 
-    account = models.ForeignKey(BankAccount, on_delete=models.CASCADE, related_name="holdings", help_text="The depot.")
+    account = models.ForeignKey(
+        BankAccount,
+        on_delete=models.CASCADE,
+        related_name="holdings",
+        help_text="The depot.",
+    )
     date = models.DateField(help_text="The day the position refers to.")
     isin = models.CharField(max_length=12, help_text="The security's ISIN.")
     name = models.CharField(max_length=1000, help_text="The security's name.")
-    security_type = models.CharField(max_length=40, null=True, blank=True, help_text="ETF, STOCK, FUND, CRYPTO, …")
-    quantity = models.DecimalField(max_digits=24, decimal_places=8, help_text="Units held (filled).")
-    fifo_price = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True, help_text="Average buy-in price per unit (FIFO).")
-    price = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True, help_text="The last quoted mid price per unit.")
+    security_type = models.CharField(
+        max_length=40, null=True, blank=True, help_text="ETF, STOCK, FUND, CRYPTO, …"
+    )
+    quantity = models.DecimalField(
+        max_digits=24, decimal_places=8, help_text="Units held (filled)."
+    )
+    fifo_price = models.DecimalField(
+        max_digits=24,
+        decimal_places=8,
+        null=True,
+        blank=True,
+        help_text="Average buy-in price per unit (FIFO).",
+    )
+    price = models.DecimalField(
+        max_digits=24,
+        decimal_places=8,
+        null=True,
+        blank=True,
+        help_text="The last quoted mid price per unit.",
+    )
     valuation = money(help_text="The position's market value.")
-    currency = models.CharField(max_length=3, help_text="ISO currency of the valuation.")
-    raw = models.JSONField(default=dict, blank=True, help_text="The position as the provider returned it.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the snapshot was first taken.")
-    updated_at = models.DateTimeField(auto_now=True, help_text="When the snapshot was last refreshed (a day can be synced several times).")
+    currency = models.CharField(
+        max_length=3, help_text="ISO currency of the valuation."
+    )
+    raw = models.JSONField(
+        default=dict, blank=True, help_text="The position as the provider returned it."
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the snapshot was first taken."
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="When the snapshot was last refreshed (a day can be synced several times).",
+    )
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["account", "date", "isin"], name="bank_hold_acct_date_isin"),
+            models.UniqueConstraint(
+                fields=["account", "date", "isin"], name="bank_hold_acct_date_isin"
+            ),
         ]
 
     def __str__(self) -> str:
@@ -655,17 +1353,44 @@ class HoldingSnapshot(models.Model):
 class Budget(Described):
     """A monthly spending limit for a category (and its children), in one currency."""
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_budgets", help_text="The organization this budget belongs to.")
-    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name="budgets", help_text="The budgeted category; child categories count towards it.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_budgets",
+        help_text="The organization this budget belongs to.",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name="budgets",
+        help_text="The budgeted category; child categories count towards it.",
+    )
     amount = money(help_text="The monthly limit, as a positive amount.")
-    currency = models.CharField(max_length=3, help_text="ISO currency of the limit; only transactions in it count.")
-    start_month = models.DateField(help_text="First month the budget applies to (the first day of it).")
-    end_month = models.DateField(null=True, blank=True, help_text="Last month the budget applies to, or open-ended.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the budget was created.")
+    currency = models.CharField(
+        max_length=3,
+        help_text="ISO currency of the limit; only transactions in it count.",
+    )
+    start_month = models.DateField(
+        help_text="First month the budget applies to (the first day of it)."
+    )
+    end_month = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Last month the budget applies to, or open-ended.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the budget was created."
+    )
     provenance = ProvenanceField()
 
     class Meta:
-        indexes = [GinIndex(fields=["stored_descriptors"], name="bank_budget_desc_gin", opclasses=["jsonb_path_ops"])]
+        indexes = [
+            GinIndex(
+                fields=["stored_descriptors"],
+                name="bank_budget_desc_gin",
+                opclasses=["jsonb_path_ops"],
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.category_id}: {self.amount} {self.currency}/month"
@@ -674,27 +1399,68 @@ class Budget(Described):
 class RecurringPayment(Described):
     """A payment detected to repeat at a regular interval (rent, salary, a subscription)."""
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_recurring", help_text="The organization this belongs to.")
-    account = models.ForeignKey(BankAccount, on_delete=models.CASCADE, related_name="recurring_payments", help_text="The account it recurs on.")
-    key = models.CharField(max_length=500, help_text="Normalized counterparty plus direction; identity across re-detection.")
-    label = models.CharField(max_length=1000, help_text="A readable name (the counterparty as last seen).")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_recurring",
+        help_text="The organization this belongs to.",
+    )
+    account = models.ForeignKey(
+        BankAccount,
+        on_delete=models.CASCADE,
+        related_name="recurring_payments",
+        help_text="The account it recurs on.",
+    )
+    key = models.CharField(
+        max_length=500,
+        help_text="Normalized counterparty plus direction; identity across re-detection.",
+    )
+    label = models.CharField(
+        max_length=1000, help_text="A readable name (the counterparty as last seen)."
+    )
     amount = money(help_text="The typical (median) signed amount.")
     currency = models.CharField(max_length=3, help_text="ISO currency.")
-    interval_days = models.PositiveIntegerField(help_text="Days between occurrences (7, 14, 30, 91 or 365).")
-    occurrences = models.PositiveIntegerField(default=0, help_text="How many matching transactions were found.")
+    interval_days = models.PositiveIntegerField(
+        help_text="Days between occurrences (7, 14, 30, 91 or 365)."
+    )
+    occurrences = models.PositiveIntegerField(
+        default=0, help_text="How many matching transactions were found."
+    )
     last_seen = models.DateField(help_text="The date of the latest occurrence.")
     next_expected = models.DateField(help_text="When the next occurrence is expected.")
-    status = models.CharField(max_length=20, choices=RecurringStatus.choices, default=RecurringStatus.DETECTED, help_text="Whether a user confirmed or ignored it.")
-    transactions = models.ManyToManyField(Transaction, related_name="recurring_payments", blank=True, help_text="The transactions that make up the pattern.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When it was first detected.")
-    updated_at = models.DateTimeField(auto_now=True, help_text="When it was last re-detected or reviewed.")
+    status = models.CharField(
+        max_length=20,
+        choices=RecurringStatus.choices,
+        default=RecurringStatus.DETECTED,
+        help_text="Whether a user confirmed or ignored it.",
+    )
+    transactions = models.ManyToManyField(
+        Transaction,
+        related_name="recurring_payments",
+        blank=True,
+        help_text="The transactions that make up the pattern.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When it was first detected."
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True, help_text="When it was last re-detected or reviewed."
+    )
     provenance = ProvenanceField()
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["account", "key", "currency"], name="bank_rec_acct_key_cur"),
+            models.UniqueConstraint(
+                fields=["account", "key", "currency"], name="bank_rec_acct_key_cur"
+            ),
         ]
-        indexes = [GinIndex(fields=["stored_descriptors"], name="bank_rec_desc_gin", opclasses=["jsonb_path_ops"])]
+        indexes = [
+            GinIndex(
+                fields=["stored_descriptors"],
+                name="bank_rec_desc_gin",
+                opclasses=["jsonb_path_ops"],
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.label} every {self.interval_days}d"
@@ -708,20 +1474,58 @@ class Merchant(EmbeddedDescriptionMixin, Described):
     rules, before semantic guesses). Name + description are embedded for semantic ``search``.
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_merchants", help_text="The organization this merchant belongs to.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_merchants",
+        help_text="The organization this merchant belongs to.",
+    )
     name = models.CharField(max_length=300, help_text="The merchant's display name.")
-    key = models.CharField(max_length=300, help_text="The normalized name; unique per organization.")
-    description = models.TextField(blank=True, default="", help_text="Notes about the merchant.")
-    website = models.URLField(max_length=500, null=True, blank=True, help_text="The merchant's website.")
-    logo_url = models.URLField(max_length=1000, null=True, blank=True, help_text="An image URL for the merchant's logo.")
-    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True, related_name="merchants", help_text="The default category of its transactions (source MERCHANT).")
-    online = models.BooleanField(default=False, help_text="Online only: no physical stores.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the merchant was created.")
+    key = models.CharField(
+        max_length=300, help_text="The normalized name; unique per organization."
+    )
+    description = models.TextField(
+        blank=True, default="", help_text="Notes about the merchant."
+    )
+    website = models.URLField(
+        max_length=500, null=True, blank=True, help_text="The merchant's website."
+    )
+    logo_url = models.URLField(
+        max_length=1000,
+        null=True,
+        blank=True,
+        help_text="An image URL for the merchant's logo.",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="merchants",
+        help_text="The default category of its transactions (source MERCHANT).",
+    )
+    online = models.BooleanField(
+        default=False, help_text="Online only: no physical stores."
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the merchant was created."
+    )
     provenance = ProvenanceField(excluded_fields=list(EMBEDDING_FIELDS))
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["organization", "key"], name="bank_merch_org_key")]
-        indexes = [*embedding_indexes("bank_merch"), GinIndex(fields=["stored_descriptors"], name="bank_merch_desc_gin", opclasses=["jsonb_path_ops"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "key"], name="bank_merch_org_key"
+            )
+        ]
+        indexes = [
+            *embedding_indexes("bank_merch"),
+            GinIndex(
+                fields=["stored_descriptors"],
+                name="bank_merch_desc_gin",
+                opclasses=["jsonb_path_ops"],
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name
@@ -734,13 +1538,32 @@ class MerchantAlias(models.Model):
     line's key wins.
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_merchant_aliases", help_text="The organization.")
-    merchant = models.ForeignKey(Merchant, on_delete=models.CASCADE, related_name="aliases", help_text="The merchant it means.")
-    pattern = models.CharField(max_length=300, help_text="Normalized words (lower-case, no numbers or boilerplate) a line's key must start with.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the alias was added.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_merchant_aliases",
+        help_text="The organization.",
+    )
+    merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.CASCADE,
+        related_name="aliases",
+        help_text="The merchant it means.",
+    )
+    pattern = models.CharField(
+        max_length=300,
+        help_text="Normalized words (lower-case, no numbers or boilerplate) a line's key must start with.",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the alias was added."
+    )
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["organization", "pattern"], name="bank_malias_org_pattern")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "pattern"], name="bank_malias_org_pattern"
+            )
+        ]
 
     def __str__(self) -> str:
         return self.pattern
@@ -755,30 +1578,86 @@ class MerchantLocation(models.Model):
     fills it in or geocodes it.
     """
 
-    merchant = models.ForeignKey(Merchant, on_delete=models.CASCADE, related_name="locations", help_text="The merchant.")
-    name = models.CharField(max_length=300, help_text="A display name (e.g. 'Spar 3418', 'Spar Mariahilfer Straße').")
-    store_code = models.CharField(max_length=20, null=True, blank=True, help_text="The store number bank lines carry for this place; unique per merchant.")
-    street = models.CharField(max_length=300, null=True, blank=True, help_text="Street and number.")
-    postal_code = models.CharField(max_length=20, null=True, blank=True, help_text="Postal code.")
+    merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.CASCADE,
+        related_name="locations",
+        help_text="The merchant.",
+    )
+    name = models.CharField(
+        max_length=300,
+        help_text="A display name (e.g. 'Spar 3418', 'Spar Mariahilfer Straße').",
+    )
+    store_code = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="The store number bank lines carry for this place; unique per merchant.",
+    )
+    street = models.CharField(
+        max_length=300, null=True, blank=True, help_text="Street and number."
+    )
+    postal_code = models.CharField(
+        max_length=20, null=True, blank=True, help_text="Postal code."
+    )
     city = models.CharField(max_length=200, null=True, blank=True, help_text="City.")
-    region = models.CharField(max_length=200, null=True, blank=True, help_text="State or region.")
-    country = models.CharField(max_length=2, null=True, blank=True, help_text="ISO 3166-1 alpha-2 country code.")
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text="WGS84 latitude.")
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text="WGS84 longitude.")
+    region = models.CharField(
+        max_length=200, null=True, blank=True, help_text="State or region."
+    )
+    country = models.CharField(
+        max_length=2,
+        null=True,
+        blank=True,
+        help_text="ISO 3166-1 alpha-2 country code.",
+    )
+    latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="WGS84 latitude.",
+    )
+    longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="WGS84 longitude.",
+    )
     point = models.GeneratedField(
         expression=MakePoint(models.F("longitude"), models.F("latitude")),
         output_field=GeographyPointField(),
         db_persist=True,
         help_text="The PostGIS point of latitude/longitude (NULL until both are known); what `near` queries use.",
     )
-    source = models.CharField(max_length=12, choices=LocationSource.choices, default=LocationSource.MANUAL, help_text="Where the location came from.")
-    osm_id = models.CharField(max_length=40, null=True, blank=True, help_text="The OpenStreetMap object it was geocoded to (N123, W456).")
-    geocoded_at = models.DateTimeField(null=True, blank=True, help_text="When it was last geocoded.")
+    source = models.CharField(
+        max_length=12,
+        choices=LocationSource.choices,
+        default=LocationSource.MANUAL,
+        help_text="Where the location came from.",
+    )
+    osm_id = models.CharField(
+        max_length=40,
+        null=True,
+        blank=True,
+        help_text="The OpenStreetMap object it was geocoded to (N123, W456).",
+    )
+    geocoded_at = models.DateTimeField(
+        null=True, blank=True, help_text="When it was last geocoded."
+    )
     notes = models.TextField(blank=True, default="", help_text="Notes.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the location was created.")
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the location was created."
+    )
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["merchant", "store_code"], condition=models.Q(store_code__isnull=False), name="bank_loc_merch_code")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["merchant", "store_code"],
+                condition=models.Q(store_code__isnull=False),
+                name="bank_loc_merch_code",
+            )
+        ]
         indexes = [GistIndex(fields=["point"], name="bank_loc_point_gist")]
 
     def __str__(self) -> str:
@@ -795,30 +1674,83 @@ class MerchantRule(models.Model):
     line picks or discovers one, as with aliases.
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_merchant_rules", help_text="The organization this rule belongs to.")
-    merchant = models.ForeignKey(Merchant, on_delete=models.CASCADE, related_name="rules", help_text="The merchant matching transactions get.")
-    location = models.ForeignKey(MerchantLocation, on_delete=models.SET_NULL, null=True, blank=True, related_name="rules", help_text="Pin this place (else a store number on the line decides).")
-    priority = models.IntegerField(default=100, help_text="Lower runs first; the first matching rule wins.")
-    field = models.CharField(max_length=20, choices=RuleField.choices, help_text="The transaction field the pattern is matched against.")
-    match = models.CharField(max_length=20, choices=RuleMatch.choices, default=RuleMatch.CONTAINS, help_text="How the pattern is compared (case-insensitive).")
-    pattern = models.CharField(max_length=1000, help_text="The text or regular expression to match.")
-    direction = models.CharField(max_length=10, choices=RuleDirection.choices, default=RuleDirection.ANY, help_text="Only match money in, money out, or both.")
-    amount_min = money(null=True, blank=True, help_text="Only match when the absolute amount is at least this.")
-    amount_max = money(null=True, blank=True, help_text="Only match when the absolute amount is at most this.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_merchant_rules",
+        help_text="The organization this rule belongs to.",
+    )
+    merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.CASCADE,
+        related_name="rules",
+        help_text="The merchant matching transactions get.",
+    )
+    location = models.ForeignKey(
+        MerchantLocation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rules",
+        help_text="Pin this place (else a store number on the line decides).",
+    )
+    priority = models.IntegerField(
+        default=100, help_text="Lower runs first; the first matching rule wins."
+    )
+    field = models.CharField(
+        max_length=20,
+        choices=RuleField.choices,
+        help_text="The transaction field the pattern is matched against.",
+    )
+    match = models.CharField(
+        max_length=20,
+        choices=RuleMatch.choices,
+        default=RuleMatch.CONTAINS,
+        help_text="How the pattern is compared (case-insensitive).",
+    )
+    pattern = models.CharField(
+        max_length=1000, help_text="The text or regular expression to match."
+    )
+    direction = models.CharField(
+        max_length=10,
+        choices=RuleDirection.choices,
+        default=RuleDirection.ANY,
+        help_text="Only match money in, money out, or both.",
+    )
+    amount_min = money(
+        null=True,
+        blank=True,
+        help_text="Only match when the absolute amount is at least this.",
+    )
+    amount_max = money(
+        null=True,
+        blank=True,
+        help_text="Only match when the absolute amount is at most this.",
+    )
     active = models.BooleanField(default=True, help_text="Inactive rules are skipped.")
-    created_at = models.DateTimeField(auto_now_add=True, help_text="When the rule was created.")
+    created_at = models.DateTimeField(
+        auto_now_add=True, help_text="When the rule was created."
+    )
     provenance = ProvenanceField()
 
     def __str__(self) -> str:
-        return f"{self.field} {self.match} {self.pattern!r} → merchant {self.merchant_id}"
+        return (
+            f"{self.field} {self.match} {self.pattern!r} → merchant {self.merchant_id}"
+        )
 
 
 class PriceSource(models.TextChoices):
     """Where security prices come from."""
 
-    SCALABLE = "SCALABLE", "Scalable Capital's official API (the organization's own login)"
+    SCALABLE = (
+        "SCALABLE",
+        "Scalable Capital's official API (the organization's own login)",
+    )
     TWELVEDATA = "TWELVEDATA", "Twelve Data (public REST API, API key)"
-    YAHOO = "YAHOO", "Yahoo Finance (unofficial public endpoints, no key; may break or rate-limit)"
+    YAHOO = (
+        "YAHOO",
+        "Yahoo Finance (unofficial public endpoints, no key; may break or rate-limit)",
+    )
 
 
 class SecurityListing(models.Model):
@@ -830,20 +1762,61 @@ class SecurityListing(models.Model):
     resolution never overwrites.
     """
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="bank_security_listings", help_text="The organization.")
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="bank_security_listings",
+        help_text="The organization.",
+    )
     isin = models.CharField(max_length=12, help_text="The security.")
-    source = models.CharField(max_length=12, choices=PriceSource.choices, help_text="The price source this listing is for.")
-    symbol = models.CharField(max_length=40, help_text="The source's symbol (Scalable: the ISIN; Yahoo: VWCE.DE; Twelve Data: VWCE).")
-    exchange = models.CharField(max_length=20, null=True, blank=True, help_text="The exchange (Twelve Data: the MIC, e.g. XETR; else the OpenFIGI exchange code).")
-    name = models.CharField(max_length=300, null=True, blank=True, help_text="The security's name as the source knows it.")
-    currency = models.CharField(max_length=3, null=True, blank=True, help_text="The listing's trading currency, once a price was fetched.")
-    pinned = models.BooleanField(default=False, help_text="Chosen by a user: automatic resolution never changes it.")
-    resolved_at = models.DateTimeField(null=True, blank=True, help_text="When it was last resolved.")
-    fetched_at = models.DateTimeField(null=True, blank=True, help_text="When prices were last fetched for it.")
-    last_error = models.TextField(null=True, blank=True, help_text="Why the last fetch failed, if it did.")
+    source = models.CharField(
+        max_length=12,
+        choices=PriceSource.choices,
+        help_text="The price source this listing is for.",
+    )
+    symbol = models.CharField(
+        max_length=40,
+        help_text="The source's symbol (Scalable: the ISIN; Yahoo: VWCE.DE; Twelve Data: VWCE).",
+    )
+    exchange = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="The exchange (Twelve Data: the MIC, e.g. XETR; else the OpenFIGI exchange code).",
+    )
+    name = models.CharField(
+        max_length=300,
+        null=True,
+        blank=True,
+        help_text="The security's name as the source knows it.",
+    )
+    currency = models.CharField(
+        max_length=3,
+        null=True,
+        blank=True,
+        help_text="The listing's trading currency, once a price was fetched.",
+    )
+    pinned = models.BooleanField(
+        default=False,
+        help_text="Chosen by a user: automatic resolution never changes it.",
+    )
+    resolved_at = models.DateTimeField(
+        null=True, blank=True, help_text="When it was last resolved."
+    )
+    fetched_at = models.DateTimeField(
+        null=True, blank=True, help_text="When prices were last fetched for it."
+    )
+    last_error = models.TextField(
+        null=True, blank=True, help_text="Why the last fetch failed, if it did."
+    )
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["organization", "isin", "source"], name="bank_listing_org_isin_src")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "isin", "source"],
+                name="bank_listing_org_isin_src",
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.isin} → {self.source}:{self.symbol}"
@@ -857,16 +1830,27 @@ class SecurityPrice(models.Model):
     goes through an organization's listings.
     """
 
-    source = models.CharField(max_length=12, choices=PriceSource.choices, help_text="Where the price came from.")
+    source = models.CharField(
+        max_length=12,
+        choices=PriceSource.choices,
+        help_text="Where the price came from.",
+    )
     symbol = models.CharField(max_length=40, help_text="The source's symbol.")
     date = models.DateField(help_text="The trading day.")
-    close = models.DecimalField(max_digits=24, decimal_places=8, help_text="The day's closing (or last) price.")
+    close = models.DecimalField(
+        max_digits=24, decimal_places=8, help_text="The day's closing (or last) price."
+    )
     currency = models.CharField(max_length=3, help_text="ISO currency of the price.")
-    fetched_at = models.DateTimeField(auto_now=True, help_text="When it was last fetched.")
+    fetched_at = models.DateTimeField(
+        auto_now=True, help_text="When it was last fetched."
+    )
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["source", "symbol", "date"], name="bank_price_src_sym_date")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "symbol", "date"], name="bank_price_src_sym_date"
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.source}:{self.symbol} {self.date} {self.close} {self.currency}"
-

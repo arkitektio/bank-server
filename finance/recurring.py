@@ -23,7 +23,13 @@ AMOUNT_TOLERANCE = Decimal("0.10")
 MIN_OCCURRENCES = 3
 LOOKBACK_DAYS = 800
 # (interval in days, how far the mean interval may be off, how much the intervals may spread).
-PERIODS = [(7, 1.5, 2.0), (14, 2.5, 3.0), (30, 4.0, 5.0), (91, 10.0, 12.0), (365, 20.0, 25.0)]
+PERIODS = [
+    (7, 1.5, 2.0),
+    (14, 2.5, 3.0),
+    (30, 4.0, 5.0),
+    (91, 10.0, 12.0),
+    (365, 20.0, 25.0),
+]
 
 _NOISE = re.compile(r"[^a-z]+")
 
@@ -50,10 +56,16 @@ def classify(dates: list[date]) -> int | None:
     return None
 
 
-def _groups(account: models.BankAccount) -> dict[tuple[str, str, str], list[models.Transaction]]:
+def _groups(
+    account: models.BankAccount,
+) -> dict[tuple[str, str, str], list[models.Transaction]]:
     since = timezone.now().date() - timedelta(days=LOOKBACK_DAYS)
     groups: dict[tuple[str, str, str], list[models.Transaction]] = {}
-    rows = account.transactions.filter(status=models.TransactionStatus.BOOKED, is_transfer=False, booking_date__gte=since).order_by("booking_date", "id")
+    rows = account.transactions.filter(
+        status=models.TransactionStatus.BOOKED,
+        is_transfer=False,
+        booking_date__gte=since,
+    ).order_by("booking_date", "id")
     for tx in rows:
         key = counterparty_key(tx)
         if key is None or tx.amount == 0:
@@ -68,7 +80,11 @@ def detect_for_account(account: models.BankAccount) -> int:
     found = 0
     for (key, currency, _direction), txs in _groups(account).items():
         median = statistics.median([tx.amount for tx in txs])
-        close = [tx for tx in txs if abs(tx.amount - median) <= abs(median) * AMOUNT_TOLERANCE]
+        close = [
+            tx
+            for tx in txs
+            if abs(tx.amount - median) <= abs(median) * AMOUNT_TOLERANCE
+        ]
         # One occurrence per day at most: a second same-day charge is not part of the rhythm.
         by_day: dict[date, models.Transaction] = {}
         for tx in close:
@@ -80,19 +96,21 @@ def detect_for_account(account: models.BankAccount) -> int:
         found += 1
         members = [by_day[d] for d in dates]
         with db_transaction.atomic():
-            pattern, created = models.RecurringPayment.objects.select_for_update().get_or_create(
-                account=account,
-                key=key[:500],
-                currency=currency,
-                defaults={
-                    "organization_id": account.organization_id,
-                    "label": members[-1].counterparty or key,
-                    "amount": statistics.median([tx.amount for tx in members]),
-                    "interval_days": period,
-                    "occurrences": len(members),
-                    "last_seen": dates[-1],
-                    "next_expected": dates[-1] + timedelta(days=period),
-                },
+            pattern, created = (
+                models.RecurringPayment.objects.select_for_update().get_or_create(
+                    account=account,
+                    key=key[:500],
+                    currency=currency,
+                    defaults={
+                        "organization_id": account.organization_id,
+                        "label": members[-1].counterparty or key,
+                        "amount": statistics.median([tx.amount for tx in members]),
+                        "interval_days": period,
+                        "occurrences": len(members),
+                        "last_seen": dates[-1],
+                        "next_expected": dates[-1] + timedelta(days=period),
+                    },
+                )
             )
             if pattern.status == models.RecurringStatus.IGNORED:
                 continue

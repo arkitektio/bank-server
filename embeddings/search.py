@@ -14,7 +14,9 @@ from embeddings import engine
 logger = logging.getLogger(__name__)
 
 
-def hybrid_search(queryset: QuerySet[Any], prefix: str, value: str, lexical: Q) -> tuple[QuerySet[Any], Q]:
+def hybrid_search(
+    queryset: QuerySet[Any], prefix: str, value: str, lexical: Q
+) -> tuple[QuerySet[Any], Q]:
     """``lexical`` OR (same embedding model AND cosine distance below the threshold), ranked.
 
     Ranking is two-tier: rows the lexical predicate matches first, then by distance, then by
@@ -36,7 +38,9 @@ def hybrid_search(queryset: QuerySet[Any], prefix: str, value: str, lexical: Q) 
     try:
         vector = engine.embed_query(value)
     except engine.EmbeddingsUnavailable as e:
-        logger.warning("Embeddings unavailable (%s); search %r is substring-only", e, value)
+        logger.warning(
+            "Embeddings unavailable (%s); search %r is substring-only", e, value
+        )
         return queryset, lexical
     if vector is None:
         return queryset, lexical
@@ -47,14 +51,20 @@ def hybrid_search(queryset: QuerySet[Any], prefix: str, value: str, lexical: Q) 
         queryset = queryset.annotate(
             **{
                 distance: CosineDistance("embedding", vector),
-                rank: Case(When(lexical, then=Value(0)), default=Value(1), output_field=IntegerField()),
+                rank: Case(
+                    When(lexical, then=Value(0)),
+                    default=Value(1),
+                    output_field=IntegerField(),
+                ),
             }
         )
     queryset = queryset.order_by(rank, F(distance).asc(nulls_last=True), "pk")
 
     # NULL embeddings give a NULL distance, which is never below the threshold: unembedded rows
     # and rows of another model are excluded from the vector leg and reachable lexically only.
-    semantic = Q(embedding_model=engine.model_id()) & Q(**{f"{distance}__lt": engine.distance_threshold()})
+    semantic = Q(embedding_model=engine.model_id()) & Q(
+        **{f"{distance}__lt": engine.distance_threshold()}
+    )
     return queryset, lexical | semantic
 
 
@@ -91,7 +101,9 @@ def neighbourhood(
         return queryset, Q(pk__in=[])
 
     if "_neighbour_distance" not in queryset.query.annotations:
-        queryset = queryset.annotate(_neighbour_distance=CosineDistance("embedding", vector))
+        queryset = queryset.annotate(
+            _neighbour_distance=CosineDistance("embedding", vector)
+        )
     queryset = queryset.order_by("_neighbour_distance", "pk")
 
     predicate = Q(embedding_model=engine.model_id()) & Q(embedding__isnull=False)
@@ -111,5 +123,7 @@ def neighbours(
     threshold: float | None = None,
 ) -> QuerySet[Any]:
     """The ``limit`` rows of ``queryset`` nearest to ``vector``, nearest first."""
-    queryset, predicate = neighbourhood(queryset, vector, exclude_pk=exclude_pk, threshold=threshold)
+    queryset, predicate = neighbourhood(
+        queryset, vector, exclude_pk=exclude_pk, threshold=threshold
+    )
     return queryset.filter(predicate)[:limit]

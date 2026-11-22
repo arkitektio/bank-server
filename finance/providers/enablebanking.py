@@ -16,8 +16,21 @@ from pydantic import BaseModel, Field
 
 from finance import crypto, models
 from finance.enablebanking import linking
-from finance.enablebanking.client import EnableBankingClient, EnableBankingConfig, endpoint
-from finance.providers.base import AuthSession, BackendBase, Finish, Institution, LinkCompletion, LinkRequest, ProviderCheck, PsuHeaders
+from finance.enablebanking.client import (
+    EnableBankingClient,
+    EnableBankingConfig,
+    endpoint,
+)
+from finance.providers.base import (
+    AuthSession,
+    BackendBase,
+    Finish,
+    Institution,
+    LinkCompletion,
+    LinkRequest,
+    ProviderCheck,
+    PsuHeaders,
+)
 from finance.providers.errors import LinkError, NotConfigured
 
 if TYPE_CHECKING:
@@ -29,11 +42,25 @@ if TYPE_CHECKING:
 class EnableBankingSettings(BaseModel):
     """The non-secret settings of an Enable Banking provider (the row's ``settings``)."""
 
-    app_id: str = Field(description="The application id; also the `kid` of every JWT signed for it.")
-    redirect_urls: list[str] = Field(default_factory=list, description="Redirect URLs registered for the application; the first is the default.")
-    consent_days: int = Field(default=90, ge=1, description="How long a new consent is requested for, in days (banks may cap it).")
-    psu_type: Literal["personal", "business"] = Field(default="personal", description="PSU type sent on authorization.")
-    key_fingerprint: str = Field(default="", description="SHA-256 of the stored key's public half, to recognise it by.")
+    app_id: str = Field(
+        description="The application id; also the `kid` of every JWT signed for it."
+    )
+    redirect_urls: list[str] = Field(
+        default_factory=list,
+        description="Redirect URLs registered for the application; the first is the default.",
+    )
+    consent_days: int = Field(
+        default=90,
+        ge=1,
+        description="How long a new consent is requested for, in days (banks may cap it).",
+    )
+    psu_type: Literal["personal", "business"] = Field(
+        default="personal", description="PSU type sent on authorization."
+    )
+    key_fingerprint: str = Field(
+        default="",
+        description="SHA-256 of the stored key's public half, to recognise it by.",
+    )
 
 
 class InvalidKey(ValueError):
@@ -46,10 +73,16 @@ def read_key(pem: str) -> tuple[bytes, str]:
     try:
         key = serialization.load_pem_private_key(data, password=None)
     except (ValueError, TypeError) as error:
-        raise InvalidKey("The private key is not a PEM file (an unencrypted `-----BEGIN PRIVATE KEY-----` block is expected).") from error
+        raise InvalidKey(
+            "The private key is not a PEM file (an unencrypted `-----BEGIN PRIVATE KEY-----` block is expected)."
+        ) from error
     if not isinstance(key, rsa.RSAPrivateKey):
-        raise InvalidKey("The private key is not an RSA key; Enable Banking applications sign with RS256.")
-    public = key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        raise InvalidKey(
+            "The private key is not an RSA key; Enable Banking applications sign with RS256."
+        )
+    public = key.public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
     digest = hashlib.sha256(public).hexdigest()
     return data, ":".join(digest[i : i + 2] for i in range(0, 32, 2))
 
@@ -59,10 +92,16 @@ class EnableBankingBackend(BackendBase):
 
     kind: ClassVar[models.Provider] = models.Provider.ENABLEBANKING
     label: ClassVar[str] = "Enable Banking"
-    description: ClassVar[str] = "Bank accounts across Europe through PSD2 consents, with your own Enable Banking application (its id and private key)."
+    description: ClassVar[str] = (
+        "Bank accounts across Europe through PSD2 consents, with your own Enable Banking application (its id and private key)."
+    )
     finish: ClassVar[Finish] = "REDIRECT"
     capabilities: ClassVar[frozenset[models.ProviderCapability]] = frozenset(
-        {models.ProviderCapability.TRANSACTIONS, models.ProviderCapability.BALANCES, models.ProviderCapability.SCHEDULED_SYNC}
+        {
+            models.ProviderCapability.TRANSACTIONS,
+            models.ProviderCapability.BALANCES,
+            models.ProviderCapability.SCHEDULED_SYNC,
+        }
     )
     has_institutions: ClassVar[bool] = True
     default_daily_sync_limit: ClassVar[int | None] = 4
@@ -74,7 +113,9 @@ class EnableBankingBackend(BackendBase):
     def config(self) -> EnableBankingConfig:
         """The client configuration of this application; decrypts its key."""
         if not self.provider.secret:
-            raise NotConfigured(f"The provider {self.provider.name!r} holds no private key; set one.")
+            raise NotConfigured(
+                f"The provider {self.provider.name!r} holds no private key; set one."
+            )
         values = self.settings()
         api_url, timeout = endpoint()
         return EnableBankingConfig(
@@ -95,7 +136,12 @@ class EnableBankingBackend(BackendBase):
         """Ask Enable Banking which application the key belongs to; fails when it knows neither."""
         async with self.client() as client:
             application = await client.application()
-        return ProviderCheck(name=application.name, environment=application.environment, active=application.active, redirect_urls=application.redirect_urls)
+        return ProviderCheck(
+            name=application.name,
+            environment=application.environment,
+            active=application.active,
+            redirect_urls=application.redirect_urls,
+        )
 
     async def institutions(self, country: str) -> list[Institution]:
         """The banks (ASPSPs) the application can reach in a country."""
@@ -107,22 +153,42 @@ class EnableBankingBackend(BackendBase):
                 country=aspsp.get("country", country),
                 logo=aspsp.get("logo"),
                 bic=aspsp.get("bic"),
-                maximum_consent_days=(aspsp.get("maximum_consent_validity") or 0) // 86400 or None,
+                maximum_consent_days=(aspsp.get("maximum_consent_validity") or 0)
+                // 86400
+                or None,
             )
             for aspsp in aspsps
         ]
 
-    async def start_link(self, organization: "Organization", creator: "User", request: LinkRequest) -> models.BankConnection:
+    async def start_link(
+        self, organization: "Organization", creator: "User", request: LinkRequest
+    ) -> models.BankConnection:
         """Start a consent at the chosen bank."""
         if not request.institution or not request.country:
-            raise LinkError("Linking through Enable Banking needs the bank (`institution`) and its `country`.", code=None)
+            raise LinkError(
+                "Linking through Enable Banking needs the bank (`institution`) and its `country`.",
+                code=None,
+            )
         async with self.client() as client:
-            return await linking.start_link(self.provider, client, organization, creator, request.institution, request.country.upper(), request.redirect_url)
+            return await linking.start_link(
+                self.provider,
+                client,
+                organization,
+                creator,
+                request.institution,
+                request.country.upper(),
+                request.redirect_url,
+            )
 
-    async def complete_link(self, connection: models.BankConnection, completion: LinkCompletion) -> models.BankConnection:
+    async def complete_link(
+        self, connection: models.BankConnection, completion: LinkCompletion
+    ) -> models.BankConnection:
         """Exchange the redirect's code for the consented accounts."""
         if not completion.code:
-            raise LinkError("Finishing a bank link needs the `code` the bank redirected back with.", code=None)
+            raise LinkError(
+                "Finishing a bank link needs the `code` the bank redirected back with.",
+                code=None,
+            )
         async with self.client() as client:
             return await linking.complete_link(client, connection, completion.code)
 
@@ -144,7 +210,12 @@ class EnableBankingBackend(BackendBase):
             redirect_url=connection.redirect_url or None,
         )
 
-    async def sync(self, syncer: models.AccountSyncer, since: date | None, psu_headers: PsuHeaders | None) -> "SyncResult":
+    async def sync(
+        self,
+        syncer: models.AccountSyncer,
+        since: date | None,
+        psu_headers: PsuHeaders | None,
+    ) -> "SyncResult":
         """Fetch the account's transactions and balances (those switched on) and upsert them."""
         from finance.sync import persist
 
@@ -152,8 +223,14 @@ class EnableBankingBackend(BackendBase):
         balances: list[dict] = []
         async with self.client() as client:
             if self.has(models.ProviderCapability.TRANSACTIONS):
-                transactions = await client.transactions(syncer.remote_id, since, psu_headers=psu_headers)
+                transactions = await client.transactions(
+                    syncer.remote_id, since, psu_headers=psu_headers
+                )
             if self.has(models.ProviderCapability.BALANCES):
-                balances = await client.balances(syncer.remote_id, psu_headers=psu_headers)
-        result: SyncResult = await database_sync_to_async(persist)(syncer.id, transactions, balances, since)
+                balances = await client.balances(
+                    syncer.remote_id, psu_headers=psu_headers
+                )
+        result: SyncResult = await database_sync_to_async(persist)(
+            syncer.id, transactions, balances, since
+        )
         return result

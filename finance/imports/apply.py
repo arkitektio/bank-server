@@ -43,9 +43,22 @@ from finance.matching import booking_day, pair, pool_for
 
 logger = logging.getLogger(__name__)
 
-BANK_FIELDS = ["booking_date", "amount", "currency", "status", "counterparty", "counterparty_iban", "remittance", "raw"]
+BANK_FIELDS = [
+    "booking_date",
+    "amount",
+    "currency",
+    "status",
+    "counterparty",
+    "counterparty_iban",
+    "remittance",
+    "raw",
+]
 # Category sources an import may replace: nobody decided these (or an earlier import did).
-REPLACEABLE = [models.CategorySource.NONE, models.CategorySource.SEMANTIC, models.CategorySource.IMPORT]
+REPLACEABLE = [
+    models.CategorySource.NONE,
+    models.CategorySource.SEMANTIC,
+    models.CategorySource.IMPORT,
+]
 
 
 class StatementImportError(Exception):
@@ -72,20 +85,32 @@ class Target:
         return f"fg:{self.reference}"[:500]
 
 
-def resolve_target(organization_id: int, reference: str, name: str | None, currency: str) -> Target:
+def resolve_target(
+    organization_id: int, reference: str, name: str | None, currency: str
+) -> Target:
     """Which account rows from source account ``reference`` land in (read-only)."""
     iban = reference if is_iban(reference) else None
-    target = Target(reference=reference, name=name, currency=currency, iban=iban, how="NEW")
+    target = Target(
+        reference=reference, name=name, currency=currency, iban=iban, how="NEW"
+    )
     if iban:
         account = adoptable(organization_id, iban, currency)
         if account is not None:
             target.how, target.account_id = "IBAN", account.id
             return target
-        candidates = list(by_iban(organization_id, iban, currency).values_list("id", flat=True))
+        candidates = list(
+            by_iban(organization_id, iban, currency).values_list("id", flat=True)
+        )
         if len(candidates) > 1:
             target.how, target.candidates = "AMBIGUOUS", candidates
             return target
-    existing = models.BankAccount.objects.filter(organization_id=organization_id, import_key=target.import_key).values_list("id", flat=True).first()
+    existing = (
+        models.BankAccount.objects.filter(
+            organization_id=organization_id, import_key=target.import_key
+        )
+        .values_list("id", flat=True)
+        .first()
+    )
     if existing is not None:
         target.how, target.account_id = "IMPORTED", existing
     return target
@@ -105,25 +130,52 @@ def _propose(organization_id: int, main: str, sub: str) -> int | None:
     """The category a new (main, sub) pair most likely means: the base taxonomy's, else the closest by terms."""
     key = base_key(main, sub)
     if key is not None:
-        found = models.Category.objects.filter(organization_id=organization_id, key=key, hidden=False).values_list("id", flat=True).first()
+        found = (
+            models.Category.objects.filter(
+                organization_id=organization_id, key=key, hidden=False
+            )
+            .values_list("id", flat=True)
+            .first()
+        )
         if found is not None:
             return found
     from finance.semantic import categories_matching
 
-    matches = categories_matching(organization_id, " ".join(part for part in (sub, main) if part))
+    matches = categories_matching(
+        organization_id, " ".join(part for part in (sub, main) if part)
+    )
     return matches[0] if matches else None
 
 
-def ensure_mappings(organization_id: int, pairs: set[tuple[str, str]], source: str = models.ImportSource.FINANZGURU) -> dict[tuple[str, str], int | None]:
+def ensure_mappings(
+    organization_id: int,
+    pairs: set[tuple[str, str]],
+    source: str = models.ImportSource.FINANZGURU,
+) -> dict[tuple[str, str], int | None]:
     """Each pair's category, proposing (and storing) a mapping for a pair seen the first time."""
     from finance.taxonomy import seed_base_categories
 
-    if pairs and not models.Category.objects.filter(organization_id=organization_id).exists():
+    if (
+        pairs
+        and not models.Category.objects.filter(organization_id=organization_id).exists()
+    ):
         seed_base_categories(organization_id)
-    known = {(m.main, m.sub): m.category_id for m in models.ImportCategoryMapping.objects.filter(organization_id=organization_id, source=source)}
+    known = {
+        (m.main, m.sub): m.category_id
+        for m in models.ImportCategoryMapping.objects.filter(
+            organization_id=organization_id, source=source
+        )
+    }
     for main, sub in sorted(pairs - set(known)):
         mapping, _ = models.ImportCategoryMapping.objects.get_or_create(
-            organization_id=organization_id, source=source, main=main[:200], sub=sub[:200], defaults={"category_id": _propose(organization_id, main, sub), "proposed": True}
+            organization_id=organization_id,
+            source=source,
+            main=main[:200],
+            sub=sub[:200],
+            defaults={
+                "category_id": _propose(organization_id, main, sub),
+                "proposed": True,
+            },
         )
         known[(main, sub)] = mapping.category_id
     return known
@@ -142,19 +194,35 @@ def _day(row: Any) -> date | None:  # noqa: ANN401 - an FgRow or a Transaction
 
 def _counts(account: models.BankAccount, rows: list[FgRow]) -> dict[str, int]:
     """How the rows would land on an existing account: already imported, paired with synced rows, new."""
-    refs = set(account.transactions.filter(import_ref__in=[r.import_ref for r in rows]).values_list("import_ref", flat=True))
+    refs = set(
+        account.transactions.filter(
+            import_ref__in=[r.import_ref for r in rows]
+        ).values_list("import_ref", flat=True)
+    )
     rest = [r for r in rows if r.import_ref not in refs]
-    pool = list(pool_for(account, models.TransactionOrigin.SYNC, [r.booking_date for r in rest]).filter(import_ref__isnull=True))
+    pool = list(
+        pool_for(
+            account, models.TransactionOrigin.SYNC, [r.booking_date for r in rest]
+        ).filter(import_ref__isnull=True)
+    )
     matched = len(pair(rest, pool, day=_day)) if pool else 0
-    return {"already_imported": len(refs), "matched": matched, "new": len(rest) - matched}
+    return {
+        "already_imported": len(refs),
+        "matched": matched,
+        "new": len(rest) - matched,
+    }
 
 
-def build_report(organization_id: int, parsed: ParsedExport, targets: dict[str, Target] | None = None) -> dict:
+def build_report(
+    organization_id: int, parsed: ParsedExport, targets: dict[str, Target] | None = None
+) -> dict:
     """What applying ``parsed`` would do — or, with the ``targets`` an apply used, what it did (and the proposed category mappings, stored)."""
     mappings = ensure_mappings(organization_id, _pairs(parsed))
     accounts = []
     for reference, rows in _groups(parsed).items():
-        target = (targets or {}).get(reference) or resolve_target(organization_id, reference, rows[0].reference_name, rows[0].currency)
+        target = (targets or {}).get(reference) or resolve_target(
+            organization_id, reference, rows[0].reference_name, rows[0].currency
+        )
         entry: dict[str, Any] = {
             **_target_dict(target),
             "rows": len(rows),
@@ -164,7 +232,9 @@ def build_report(organization_id: int, parsed: ParsedExport, targets: dict[str, 
         if target.how == "SKIPPED":
             entry.update({"already_imported": 0, "matched": 0, "new": 0})
         elif target.account_id is not None:
-            entry.update(_counts(models.BankAccount.objects.get(id=target.account_id), rows))
+            entry.update(
+                _counts(models.BankAccount.objects.get(id=target.account_id), rows)
+            )
         else:
             entry.update({"already_imported": 0, "matched": 0, "new": len(rows)})
         accounts.append(entry)
@@ -177,28 +247,44 @@ def build_report(organization_id: int, parsed: ParsedExport, targets: dict[str, 
         "splits_folded": parsed.splits_folded,
         "warnings": parsed.warnings,
         "accounts": accounts,
-        "unmapped_categories": [{"main": m, "sub": s, "rows": n} for (m, s), n in sorted(unmapped.items())],
+        "unmapped_categories": [
+            {"main": m, "sub": s, "rows": n} for (m, s), n in sorted(unmapped.items())
+        ],
     }
 
 
 def _target_dict(target: Target) -> dict[str, Any]:
     out = asdict(target)
-    out["account_name"] = models.BankAccount.objects.filter(id=target.account_id).values_list("name", flat=True).first() if target.account_id else None
+    out["account_name"] = (
+        models.BankAccount.objects.filter(id=target.account_id)
+        .values_list("name", flat=True)
+        .first()
+        if target.account_id
+        else None
+    )
     return out
 
 
-def preview(statement_import: models.StatementImport, content: bytes) -> models.StatementImport:
+def preview(
+    statement_import: models.StatementImport, content: bytes
+) -> models.StatementImport:
     """Parse the file and store what applying it would do (status PREVIEWED, or FAILED)."""
     from finance.imports.finanzguru import ExportError
 
     try:
         parsed = parse(content)
     except ExportError as error:
-        statement_import.status, statement_import.error = models.ImportStatus.FAILED, str(error)
+        statement_import.status, statement_import.error = (
+            models.ImportStatus.FAILED,
+            str(error),
+        )
         statement_import.save(update_fields=["status", "error"])
         return statement_import
     statement_import.report = build_report(statement_import.organization_id, parsed)
-    statement_import.status, statement_import.error = models.ImportStatus.PREVIEWED, None
+    statement_import.status, statement_import.error = (
+        models.ImportStatus.PREVIEWED,
+        None,
+    )
     statement_import.save(update_fields=["report", "status", "error"])
     return statement_import
 
@@ -222,13 +308,17 @@ def _choose(organization_id: int, target: Target, choice: dict | None) -> Target
     """Apply the caller's choice for a source account: an existing account, a new one, or skip it."""
     if choice is None:
         if target.how == "AMBIGUOUS":
-            raise StatementImportError(f"Several accounts have the IBAN of {target.reference}; choose one (or a new account) for it.")
+            raise StatementImportError(
+                f"Several accounts have the IBAN of {target.reference}; choose one (or a new account) for it."
+            )
         return target
     if choice.get("skip"):
         target.how, target.account_id = "SKIPPED", None
     elif choice.get("account") is not None:
         account_id = int(choice["account"])
-        if not models.BankAccount.objects.filter(organization_id=organization_id, id=account_id).exists():
+        if not models.BankAccount.objects.filter(
+            organization_id=organization_id, id=account_id
+        ).exists():
             raise StatementImportError(f"No account {account_id} in your organization.")
         target.how, target.account_id = "CHOSEN", account_id
     else:
@@ -243,7 +333,12 @@ def _account_for(organization_id: int, target: Target) -> models.BankAccount:
     account, _ = models.BankAccount.objects.get_or_create(
         organization_id=organization_id,
         import_key=target.import_key,
-        defaults={"iban": target.iban, "name": target.name or target.reference, "currency": target.currency, "product": "Finanzguru import"},
+        defaults={
+            "iban": target.iban,
+            "name": target.name or target.reference,
+            "currency": target.currency,
+            "product": "Finanzguru import",
+        },
     )
     return account
 
@@ -274,15 +369,42 @@ def _bank_fields(row: FgRow) -> dict:
     }
 
 
-def _annotate(tx: models.Transaction, row: FgRow, category_id: int | None, statement_import: models.StatementImport) -> bool:
+def _annotate(
+    tx: models.Transaction,
+    row: FgRow,
+    category_id: int | None,
+    statement_import: models.StatementImport,
+) -> bool:
     """Carry the import's annotations onto ``tx`` where nobody decided otherwise; True if anything changed."""
-    before = (tx.category_id, tx.category_source, tx.note, tx.is_transfer, tx.is_transfer_manual, tx.import_ref, tx.import_raw, tx.statement_import_id)
-    replaceable = [*REPLACEABLE, *([models.CategorySource.MERCHANT] if hasattr(models.CategorySource, "MERCHANT") else [])]
+    before = (
+        tx.category_id,
+        tx.category_source,
+        tx.note,
+        tx.is_transfer,
+        tx.is_transfer_manual,
+        tx.import_ref,
+        tx.import_raw,
+        tx.statement_import_id,
+    )
+    replaceable = [
+        *REPLACEABLE,
+        *(
+            [models.CategorySource.MERCHANT]
+            if hasattr(models.CategorySource, "MERCHANT")
+            else []
+        ),
+    ]
     if tx.category_source in replaceable:
         if category_id is not None:
-            tx.category_id, tx.category_source = category_id, models.CategorySource.IMPORT
+            tx.category_id, tx.category_source = (
+                category_id,
+                models.CategorySource.IMPORT,
+            )
         elif tx.category_source == models.CategorySource.IMPORT:
-            tx.category_id, tx.category_source = None, models.CategorySource.NONE  # its mapping was cleared
+            tx.category_id, tx.category_source = (
+                None,
+                models.CategorySource.NONE,
+            )  # its mapping was cleared
     if row.note and not tx.note:
         tx.note = row.note
     pinned_by_import = bool((tx.import_raw or {}).get("transfer_pinned"))
@@ -291,15 +413,47 @@ def _annotate(tx: models.Transaction, row: FgRow, category_id: int | None, state
     elif not row.transfer and pinned_by_import:
         tx.is_transfer_manual, pinned_by_import = False, False  # back to detection
     tx.import_ref = row.import_ref
-    tx.import_raw = {**row.extra, "source": "FINANZGURU", "reference": row.reference, "main": row.main, "sub": row.sub, "transfer": row.transfer, "transfer_pinned": pinned_by_import}
+    tx.import_raw = {
+        **row.extra,
+        "source": "FINANZGURU",
+        "reference": row.reference,
+        "main": row.main,
+        "sub": row.sub,
+        "transfer": row.transfer,
+        "transfer_pinned": pinned_by_import,
+    }
     tx.statement_import = statement_import
-    return before != (tx.category_id, tx.category_source, tx.note, tx.is_transfer, tx.is_transfer_manual, tx.import_ref, tx.import_raw, tx.statement_import_id)
+    return before != (
+        tx.category_id,
+        tx.category_source,
+        tx.note,
+        tx.is_transfer,
+        tx.is_transfer_manual,
+        tx.import_ref,
+        tx.import_raw,
+        tx.statement_import_id,
+    )
 
 
-ANNOTATION_FIELDS = ["category", "category_source", "note", "is_transfer", "is_transfer_manual", "import_ref", "import_raw", "statement_import"]
+ANNOTATION_FIELDS = [
+    "category",
+    "category_source",
+    "note",
+    "is_transfer",
+    "is_transfer_manual",
+    "import_ref",
+    "import_raw",
+    "statement_import",
+]
 
 
-def _write_account(account_id: int, rows: list[FgRow], mappings: dict[tuple[str, str], int | None], statement_import: models.StatementImport, result: Applied) -> list[int]:
+def _write_account(
+    account_id: int,
+    rows: list[FgRow],
+    mappings: dict[tuple[str, str], int | None],
+    statement_import: models.StatementImport,
+    result: Applied,
+) -> list[int]:
     """Write one account's rows under its row lock; returns the ids of the rows written."""
     from bank_server.service import service  # it imports finance.models
     from finance.semantic import embed_rows
@@ -307,9 +461,18 @@ def _write_account(account_id: int, rows: list[FgRow], mappings: dict[tuple[str,
     now = timezone.now()
     with db_transaction.atomic():
         account = models.BankAccount.objects.select_for_update().get(id=account_id)
-        by_ref = {tx.import_ref: tx for tx in account.transactions.filter(import_ref__in=[r.import_ref for r in rows])}
+        by_ref = {
+            tx.import_ref: tx
+            for tx in account.transactions.filter(
+                import_ref__in=[r.import_ref for r in rows]
+            )
+        }
         rest = [r for r in rows if r.import_ref not in by_ref]
-        pool = list(pool_for(account, models.TransactionOrigin.SYNC, [r.booking_date for r in rest]).filter(import_ref__isnull=True))
+        pool = list(
+            pool_for(
+                account, models.TransactionOrigin.SYNC, [r.booking_date for r in rest]
+            ).filter(import_ref__isnull=True)
+        )
         paired = pair(rest, pool, day=_day) if pool else {}
         paired_by_ref = {rest[index].import_ref: tx for index, tx in paired.items()}
 
@@ -324,7 +487,9 @@ def _write_account(account_id: int, rows: list[FgRow], mappings: dict[tuple[str,
                 changed = False
                 if tx.origin == models.TransactionOrigin.IMPORT:
                     fields = _bank_fields(row)
-                    if any(getattr(tx, name) != value for name, value in fields.items()):
+                    if any(
+                        getattr(tx, name) != value for name, value in fields.items()
+                    ):
                         for name, value in fields.items():
                             setattr(tx, name, value)
                         reembed.append(tx)
@@ -342,7 +507,12 @@ def _write_account(account_id: int, rows: list[FgRow], mappings: dict[tuple[str,
                 to_update.append(tx)
                 counts["enriched"] += 1
                 continue
-            tx = models.Transaction(account=account, origin=models.TransactionOrigin.IMPORT, fingerprint=row.import_ref, **_bank_fields(row))
+            tx = models.Transaction(
+                account=account,
+                origin=models.TransactionOrigin.IMPORT,
+                fingerprint=row.import_ref,
+                **_bank_fields(row),
+            )
             _annotate(tx, row, category_id, statement_import)
             to_create.append(tx)
             counts["created"] += 1
@@ -350,8 +520,14 @@ def _write_account(account_id: int, rows: list[FgRow], mappings: dict[tuple[str,
         embed_rows(to_create + reembed)
         # No pre_save sees a bulk write: the rows are described before they are written.
         models.Transaction.objects.bulk_create(service.stamp(to_create))
-        written = [*BANK_FIELDS, *ANNOTATION_FIELDS, "updated_at", *EMBEDDING_FIELDS] if reembed else [*ANNOTATION_FIELDS, "updated_at"]
-        models.Transaction.objects.bulk_update(service.stamp(to_update), [*written, "stored_descriptors"], batch_size=500)
+        written = (
+            [*BANK_FIELDS, *ANNOTATION_FIELDS, "updated_at", *EMBEDDING_FIELDS]
+            if reembed
+            else [*ANNOTATION_FIELDS, "updated_at"]
+        )
+        models.Transaction.objects.bulk_update(
+            service.stamp(to_update), [*written, "stored_descriptors"], batch_size=500
+        )
         result.balances += _balances(account, rows)
         for name, value in counts.items():
             setattr(result, name, getattr(result, name) + value)
@@ -369,17 +545,28 @@ def _balances(account: models.BankAccount, rows: list[FgRow]) -> int:
     end_of_day: dict[date, FgRow] = {}
     for row in with_balance if newest_first else reversed(with_balance):
         end_of_day.setdefault(row.booking_date, row)
-    reported = set(account.balances.exclude(balance_type="IMPT").filter(date__in=list(end_of_day)).values_list("date", flat=True))
+    reported = set(
+        account.balances.exclude(balance_type="IMPT")
+        .filter(date__in=list(end_of_day))
+        .values_list("date", flat=True)
+    )
     written = 0
     for day, row in end_of_day.items():
         if day in reported:
             continue
-        models.BalanceSnapshot.objects.update_or_create(account=account, date=day, balance_type="IMPT", defaults={"amount": row.balance, "currency": row.currency})
+        models.BalanceSnapshot.objects.update_or_create(
+            account=account,
+            date=day,
+            balance_type="IMPT",
+            defaults={"amount": row.balance, "currency": row.currency},
+        )
         written += 1
     return written
 
 
-def apply(statement_import_id: int, content: bytes, choices: dict[str, dict] | None = None) -> models.StatementImport:
+def apply(
+    statement_import_id: int, content: bytes, choices: dict[str, dict] | None = None
+) -> models.StatementImport:
     """Write the import into the accounts (see the module docstring); re-applying is idempotent.
 
     ``choices`` maps a source account (``Referenzkonto``) to ``{"account": id}`` (land in that
@@ -392,16 +579,26 @@ def apply(statement_import_id: int, content: bytes, choices: dict[str, dict] | N
     choices = choices or {}
     with db_transaction.atomic():
         # One apply of an import at a time (the lock is held for the whole apply).
-        statement_import = models.StatementImport.objects.select_for_update().get(id=statement_import_id)
+        statement_import = models.StatementImport.objects.select_for_update().get(
+            id=statement_import_id
+        )
         organization_id = statement_import.organization_id
         parsed = parse(content)
         groups = _groups(parsed)
         unknown = set(choices) - set(groups)
         if unknown:
-            raise StatementImportError(f"The file has no source account {', '.join(sorted(unknown))}.")
+            raise StatementImportError(
+                f"The file has no source account {', '.join(sorted(unknown))}."
+            )
         mappings = ensure_mappings(organization_id, _pairs(parsed))
         targets = {
-            reference: _choose(organization_id, resolve_target(organization_id, reference, rows[0].reference_name, rows[0].currency), choices.get(reference))
+            reference: _choose(
+                organization_id,
+                resolve_target(
+                    organization_id, reference, rows[0].reference_name, rows[0].currency
+                ),
+                choices.get(reference),
+            )
             for reference, rows in groups.items()
         }
 
@@ -415,7 +612,9 @@ def apply(statement_import_id: int, content: bytes, choices: dict[str, dict] | N
             account = _account_for(organization_id, target)
             target.account_id = account.id
             accounts.append(account.id)
-            touched += _write_account(account.id, rows, mappings, statement_import, result)
+            touched += _write_account(
+                account.id, rows, mappings, statement_import, result
+            )
         result.categorized = categorize_rows(organization_id, touched)
         detect_transfers(organization_id)
 
@@ -423,11 +622,24 @@ def apply(statement_import_id: int, content: bytes, choices: dict[str, dict] | N
             **build_report(organization_id, parsed, targets),
             "applied": asdict(result),
         }
-        statement_import.status, statement_import.error, statement_import.applied_at = models.ImportStatus.APPLIED, None, timezone.now()
+        statement_import.status, statement_import.error, statement_import.applied_at = (
+            models.ImportStatus.APPLIED,
+            None,
+            timezone.now(),
+        )
         statement_import.save(update_fields=["report", "status", "error", "applied_at"])
 
     for account_id in accounts:
         detect_recurring(account_id)
-        per_account = next((a for a in result.accounts if a["account_id"] == account_id), {})
-        broadcast_sync(organization_id, SyncResult(account_id=account_id, created=per_account.get("created", 0), updated=per_account.get("enriched", 0) + per_account.get("updated", 0)))
+        per_account = next(
+            (a for a in result.accounts if a["account_id"] == account_id), {}
+        )
+        broadcast_sync(
+            organization_id,
+            SyncResult(
+                account_id=account_id,
+                created=per_account.get("created", 0),
+                updated=per_account.get("enriched", 0) + per_account.get("updated", 0),
+            ),
+        )
     return statement_import

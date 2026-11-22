@@ -100,5 +100,7 @@ class DpopKey:
             + "."
             + _b64(json.dumps(claims, separators=(",", ":")).encode())
         )
-        r, s = decode_dss_signature(self._key.sign(signing_input.encode(), ec.ECDSA(hashes.SHA256())))
+        r, s = decode_dss_signature(
+            self._key.sign(signing_input.encode(), ec.ECDSA(hashes.SHA256()))
+        )
         return signing_input + "." + _b64(r.to_bytes(32, "big") + s.to_bytes(32, "big"))

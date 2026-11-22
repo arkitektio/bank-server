@@ -37,7 +37,12 @@ NEIGHBOURS, TERMS, BOTH = "NEIGHBOURS", "TERMS", "BOTH"
 #: Rows whose category someone decided (a user, a rule, a merchant's default, an imported
 #: statement — its history was categorized in the other app): they vote. A SEMANTIC row never
 #: does — a guess must not confirm itself.
-VOTING_SOURCES = [models.CategorySource.MANUAL, models.CategorySource.RULE, models.CategorySource.MERCHANT, models.CategorySource.IMPORT]
+VOTING_SOURCES = [
+    models.CategorySource.MANUAL,
+    models.CategorySource.RULE,
+    models.CategorySource.MERCHANT,
+    models.CategorySource.IMPORT,
+]
 
 
 def conf() -> dict:
@@ -61,9 +66,16 @@ def embed_rows(rows: list[Any]) -> None:
         return
     sources = [row.embedding_source_text() for row in stale]
     try:
-        vectors = iter(engine.embed_texts([source for source in sources if source is not None]))
+        vectors = iter(
+            engine.embed_texts([source for source in sources if source is not None])
+        )
     except engine.EmbeddingsUnavailable as error:
-        logger.warning("Could not embed %s %s rows (%s); leaving them for reembed_stale", len(stale), type(stale[0]).__name__, error)
+        logger.warning(
+            "Could not embed %s %s rows (%s); leaving them for reembed_stale",
+            len(stale),
+            type(stale[0]).__name__,
+            error,
+        )
         for row in stale:
             row.embedding, row.embedding_model = None, ""
         return
@@ -79,7 +91,11 @@ def sync_terms(category: models.Category, texts: list[str]) -> None:
     with db_transaction.atomic():
         existing = {term.text: term for term in category.terms.all()}
         category.terms.exclude(text__in=texts).delete()
-        new = [models.CategoryTerm(category=category, text=text) for text in texts if text not in existing]
+        new = [
+            models.CategoryTerm(category=category, text=text)
+            for text in texts
+            if text not in existing
+        ]
         embed_rows(new)
         models.CategoryTerm.objects.bulk_create(new, ignore_conflicts=True)
 
@@ -106,7 +122,11 @@ def _compatible_kinds(amount: Any) -> list[str]:
 
 
 def _usable(tx: models.Transaction) -> bool:
-    return engine.enabled() and tx.embedding is not None and tx.embedding_model == engine.model_id()
+    return (
+        engine.enabled()
+        and tx.embedding is not None
+        and tx.embedding_model == engine.model_id()
+    )
 
 
 def suggest(tx: models.Transaction, limit: int = 3) -> list[Suggestion]:
@@ -141,7 +161,9 @@ def suggest(tx: models.Transaction, limit: int = 3) -> list[Suggestion]:
         .defer("embedding")[: c["neighbours"]]
     )
     for neighbour in near:
-        weight = (1 - neighbour._d / cut) * (2.0 if neighbour.category_source == models.CategorySource.MANUAL else 1.0)
+        weight = (1 - neighbour._d / cut) * (
+            2.0 if neighbour.category_source == models.CategorySource.MANUAL else 1.0
+        )
         weights[neighbour.category_id] += weight
         counts[neighbour.category_id] += 1
         if len(evidence[neighbour.category_id]) < 3:
@@ -149,7 +171,13 @@ def suggest(tx: models.Transaction, limit: int = 3) -> list[Suggestion]:
 
     term_cut = c["term_distance"]
     terms = (
-        models.CategoryTerm.objects.filter(category__organization_id=organization_id, category__hidden=False, category__kind__in=kinds, embedding_model=engine.model_id(), embedding__isnull=False)
+        models.CategoryTerm.objects.filter(
+            category__organization_id=organization_id,
+            category__hidden=False,
+            category__kind__in=kinds,
+            embedding_model=engine.model_id(),
+            embedding__isnull=False,
+        )
         .annotate(_d=CosineDistance("embedding", tx.embedding))
         .filter(_d__lt=term_cut)
         .order_by("_d")
@@ -168,8 +196,23 @@ def suggest(tx: models.Transaction, limit: int = 3) -> list[Suggestion]:
     ranked = sorted(weights.items(), key=lambda item: (-item[1], item[0]))[:limit]
     out = []
     for category_id, weight in ranked:
-        reason = BOTH if counts[category_id] and category_id in closest else NEIGHBOURS if counts[category_id] else TERMS
-        out.append(Suggestion(categories[category_id], round(weight / total, 4), reason, counts[category_id], closest.get(category_id), evidence[category_id]))
+        reason = (
+            BOTH
+            if counts[category_id] and category_id in closest
+            else NEIGHBOURS
+            if counts[category_id]
+            else TERMS
+        )
+        out.append(
+            Suggestion(
+                categories[category_id],
+                round(weight / total, 4),
+                reason,
+                counts[category_id],
+                closest.get(category_id),
+                evidence[category_id],
+            )
+        )
     return out
 
 
@@ -178,7 +221,10 @@ def confident(suggestion: Suggestion) -> bool:
     c = conf()
     if suggestion.score < c["auto_assign_threshold"]:
         return False
-    exact_term = suggestion.closest_term is not None and suggestion.closest_term <= c["term_assign_distance"]
+    exact_term = (
+        suggestion.closest_term is not None
+        and suggestion.closest_term <= c["term_assign_distance"]
+    )
     return suggestion.neighbours >= c["min_evidence"] or exact_term
 
 
@@ -189,15 +235,24 @@ def auto_assign(organization_id: int, transaction_ids: list[int]) -> int:
     if not conf()["auto_assign"] or not engine.enabled() or not transaction_ids:
         return 0
     rows = models.Transaction.objects.filter(
-        account__organization_id=organization_id, id__in=transaction_ids, category_source=models.CategorySource.NONE
+        account__organization_id=organization_id,
+        id__in=transaction_ids,
+        category_source=models.CategorySource.NONE,
     ).select_related("account")
     changed = []
     for tx in rows:
         suggestions = suggest(tx, limit=1)
         if suggestions and confident(suggestions[0]):
-            tx.category_id, tx.category_source = suggestions[0].category.id, models.CategorySource.SEMANTIC
+            tx.category_id, tx.category_source = (
+                suggestions[0].category.id,
+                models.CategorySource.SEMANTIC,
+            )
             changed.append(tx)
-    models.Transaction.objects.bulk_update(service.stamp(changed), ["category", "category_source", "stored_descriptors"], batch_size=500)
+    models.Transaction.objects.bulk_update(
+        service.stamp(changed),
+        ["category", "category_source", "stored_descriptors"],
+        batch_size=500,
+    )
     return len(changed)
 
 
@@ -206,8 +261,15 @@ def reset_semantic(organization_id: int, transactions: QuerySet) -> int:
     from bank_server.service import restore_transactions
 
     # The filter is what the update changes: the rows are known before it, to restore them after.
-    ids = list(transactions.filter(account__organization_id=organization_id, category_source=models.CategorySource.SEMANTIC).values_list("id", flat=True))
-    reset = models.Transaction.objects.filter(id__in=ids).update(category=None, category_source=models.CategorySource.NONE)
+    ids = list(
+        transactions.filter(
+            account__organization_id=organization_id,
+            category_source=models.CategorySource.SEMANTIC,
+        ).values_list("id", flat=True)
+    )
+    reset = models.Transaction.objects.filter(id__in=ids).update(
+        category=None, category_source=models.CategorySource.NONE
+    )
     restore_transactions(ids)
     return reset
 
@@ -225,7 +287,12 @@ def categories_matching(organization_id: int, text: str) -> list[int]:
     if vector is None:
         return []
     rows = (
-        models.CategoryTerm.objects.filter(category__organization_id=organization_id, category__hidden=False, embedding_model=engine.model_id(), embedding__isnull=False)
+        models.CategoryTerm.objects.filter(
+            category__organization_id=organization_id,
+            category__hidden=False,
+            embedding_model=engine.model_id(),
+            embedding__isnull=False,
+        )
         .annotate(_d=CosineDistance("embedding", vector))
         .filter(_d__lt=conf()["term_distance"])
         .order_by("_d")
@@ -237,7 +304,9 @@ def categories_matching(organization_id: int, text: str) -> list[int]:
 # --- "near this category" ------------------------------------------------------------------------
 
 
-def near_category(queryset: QuerySet, category: models.Category, prefix: str = "") -> tuple[QuerySet, Q]:
+def near_category(
+    queryset: QuerySet, category: models.Category, prefix: str = ""
+) -> tuple[QuerySet, Q]:
     """``queryset`` (transactions) ordered by closeness to ``category``, with the predicate for "close".
 
     Closeness is the smaller of: the distance to the centroid of the category's MANUAL/RULE
@@ -246,11 +315,17 @@ def near_category(queryset: QuerySet, category: models.Category, prefix: str = "
     current vector never match.
     """
     if prefix or not engine.enabled():
-        return queryset, Q(pk__in=[])  # nested filters get no semantic leg (as in hybrid_search)
+        return queryset, Q(
+            pk__in=[]
+        )  # nested filters get no semantic leg (as in hybrid_search)
     alias = f"_near_category_{category.pk}"
     if alias not in queryset.query.annotations:
         term = (
-            models.CategoryTerm.objects.filter(category=category, embedding_model=engine.model_id(), embedding__isnull=False)
+            models.CategoryTerm.objects.filter(
+                category=category,
+                embedding_model=engine.model_id(),
+                embedding__isnull=False,
+            )
             .annotate(_d=CosineDistance("embedding", OuterRef(f"{prefix}embedding")))
             .order_by("_d")
             .values("_d")[:1]
@@ -260,8 +335,12 @@ def near_category(queryset: QuerySet, category: models.Category, prefix: str = "
         if centroid is not None:
             distances.append(CosineDistance(f"{prefix}embedding", centroid))
         expression = Least(*distances) if len(distances) > 1 else distances[0]
-        queryset = queryset.annotate(**{alias: expression}).order_by(F(alias).asc(nulls_last=True), "pk")
-    predicate = Q(**{f"{prefix}embedding_model": engine.model_id()}) & Q(**{f"{alias}__lt": engine.distance_threshold()})
+        queryset = queryset.annotate(**{alias: expression}).order_by(
+            F(alias).asc(nulls_last=True), "pk"
+        )
+    predicate = Q(**{f"{prefix}embedding_model": engine.model_id()}) & Q(
+        **{f"{alias}__lt": engine.distance_threshold()}
+    )
     return queryset, predicate
 
 
@@ -271,7 +350,9 @@ def category_centroid(category: models.Category) -> list[float] | None:
 
     vectors = list(
         category.transactions.filter(
-            category_source__in=VOTING_SOURCES, embedding_model=engine.model_id(), embedding__isnull=False
+            category_source__in=VOTING_SOURCES,
+            embedding_model=engine.model_id(),
+            embedding__isnull=False,
         ).values_list("embedding", flat=True)[:500]
     )
     if not vectors:

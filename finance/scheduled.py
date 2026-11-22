@@ -21,10 +21,10 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
+from bank_server.hook_agent import agent
 from finance import models
 from finance.errors import SyncBudgetExhausted
 from finance.sync import AlreadySyncing, after_sync, sync_budget, sync_syncer
-from bank_server.hook_agent import agent
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +34,20 @@ def _due_syncers(organization: str) -> list[int]:
     now = timezone.now()
     reserve = settings.BANK_SYNC.get("scheduled_reserve", 1)
     candidates = (
-        models.AccountSyncer.objects.filter(organization__identifier=organization, connection__status=models.ConnectionStatus.ACTIVE)
-        .filter(Q(connection__valid_until__isnull=True) | Q(connection__valid_until__gt=now))
+        models.AccountSyncer.objects.filter(
+            organization__identifier=organization,
+            connection__status=models.ConnectionStatus.ACTIVE,
+        )
+        .filter(
+            Q(connection__valid_until__isnull=True) | Q(connection__valid_until__gt=now)
+        )
         # Only what an admin let run unattended: an enabled provider with SCHEDULED_SYNC on.
-        .filter(connection__bank_provider__enabled=True, connection__bank_provider__capabilities__contains=[models.ProviderCapability.SCHEDULED_SYNC.value])
+        .filter(
+            connection__bank_provider__enabled=True,
+            connection__bank_provider__capabilities__contains=[
+                models.ProviderCapability.SCHEDULED_SYNC.value
+            ],
+        )
         .select_related("connection__bank_provider")
         .order_by("id")
     )
@@ -66,7 +76,9 @@ async def sync_all_accounts(organization: str) -> dict:
             synced += 1
         except (AlreadySyncing, SyncBudgetExhausted):
             skipped += 1  # a user's sync holds it, or the budget ran out meanwhile
-        except Exception as error:  # recorded on the syncer by sync_syncer; one line here
+        except (
+            Exception
+        ) as error:  # recorded on the syncer by sync_syncer; one line here
             failed += 1
             logger.warning("Scheduled sync of syncer %s failed: %s", syncer_id, error)
     return {"synced": synced, "skipped": skipped, "failed": failed}
@@ -78,7 +90,11 @@ def _reembed(organization: str) -> int:
 
     if not engine.enabled():
         return 0
-    return reembed_all([models.Transaction, models.Category, models.CategoryTerm], max_batches=50, organization=organization)
+    return reembed_all(
+        [models.Transaction, models.Category, models.CategoryTerm],
+        max_batches=50,
+        organization=organization,
+    )
 
 
 @agent.action(

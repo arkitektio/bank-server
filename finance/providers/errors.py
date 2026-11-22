@@ -30,7 +30,11 @@ class ProviderError(Exception):
         """The kind of failure a client acts on."""
         if self.explicit_code is not None:
             return self.explicit_code
-        return BankErrorCode.BANK_UNAVAILABLE if self.status == 0 or self.status >= 500 else BankErrorCode.BANK_ERROR
+        return (
+            BankErrorCode.BANK_UNAVAILABLE
+            if self.status == 0 or self.status >= 500
+            else BankErrorCode.BANK_ERROR
+        )
 
 
 class NotConfigured(ProviderError):
@@ -52,6 +56,8 @@ class LinkError(Exception):
     input (a validation error).
     """
 
-    def __init__(self, message: str, code: BankErrorCode | None = BankErrorCode.INVALID_STATE) -> None:
+    def __init__(
+        self, message: str, code: BankErrorCode | None = BankErrorCode.INVALID_STATE
+    ) -> None:
         super().__init__(message)
         self.code = code

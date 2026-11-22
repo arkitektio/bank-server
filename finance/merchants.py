@@ -22,7 +22,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from django.db import IntegrityError, transaction as db_transaction
+from django.db import IntegrityError
+from django.db import transaction as db_transaction
 from django.db.models import Count
 
 from finance import models
@@ -31,7 +32,11 @@ from finance.textnorm import normalize
 _STORE_CODE = re.compile(r"(?<!\d)(\d{3,6})(?!\d)")
 
 #: Category sources a merchant may overwrite: nobody pinned these.
-OVERWRITABLE = (models.CategorySource.NONE, models.CategorySource.SEMANTIC, models.CategorySource.MERCHANT)
+OVERWRITABLE = (
+    models.CategorySource.NONE,
+    models.CategorySource.SEMANTIC,
+    models.CategorySource.MERCHANT,
+)
 
 
 def merchant_key(text: str | None) -> str | None:
@@ -49,8 +54,13 @@ def store_code(text: str | None) -> str | None:
 
 def _aliases(organization_id: int) -> list[tuple[tuple[str, ...], int]]:
     """The organization's aliases as word tuples, longest first."""
-    rows = models.MerchantAlias.objects.filter(organization_id=organization_id).values_list("pattern", "merchant_id")
-    return sorted(((tuple(pattern.split()), merchant_id) for pattern, merchant_id in rows), key=lambda item: -len(item[0]))
+    rows = models.MerchantAlias.objects.filter(
+        organization_id=organization_id
+    ).values_list("pattern", "merchant_id")
+    return sorted(
+        ((tuple(pattern.split()), merchant_id) for pattern, merchant_id in rows),
+        key=lambda item: -len(item[0]),
+    )
 
 
 def resolve(key: str | None, aliases: list[tuple[tuple[str, ...], int]]) -> int | None:
@@ -78,12 +88,27 @@ def match(organization_id: int, transaction_ids: list[int]) -> int:
     if not transaction_ids:
         return 0
     aliases = _aliases(organization_id)
-    rules = list(models.MerchantRule.objects.filter(organization_id=organization_id, active=True).order_by("priority", "id"))
+    rules = list(
+        models.MerchantRule.objects.filter(
+            organization_id=organization_id, active=True
+        ).order_by("priority", "id")
+    )
     rows = list(
-        models.Transaction.objects.filter(account__organization_id=organization_id, id__in=transaction_ids)
+        models.Transaction.objects.filter(
+            account__organization_id=organization_id, id__in=transaction_ids
+        )
         .exclude(merchant_source=models.MerchantSource.MANUAL)
         # What the rows are described by too: a changed row is stamped, without a query per field.
-        .only("id", "counterparty", "counterparty_iban", "remittance", "merchant_location_id", "merchant_source", "stored_descriptors", *TRANSACTION_FIELDS)
+        .only(
+            "id",
+            "counterparty",
+            "counterparty_iban",
+            "remittance",
+            "merchant_location_id",
+            "merchant_source",
+            "stored_descriptors",
+            *TRANSACTION_FIELDS,
+        )
     )
     locations: dict[tuple[int, str], int] = {}
     changed = []
@@ -92,37 +117,68 @@ def match(organization_id: int, transaction_ids: list[int]) -> int:
         if rule is not None:
             merchant_id, source = rule.merchant_id, models.MerchantSource.RULE
         else:
-            merchant_id, source = resolve(merchant_key(tx.counterparty), aliases), models.MerchantSource.AUTO
+            merchant_id, source = (
+                resolve(merchant_key(tx.counterparty), aliases),
+                models.MerchantSource.AUTO,
+            )
         if merchant_id is None:
-            if tx.merchant_source in (models.MerchantSource.AUTO, models.MerchantSource.RULE):
+            if tx.merchant_source in (
+                models.MerchantSource.AUTO,
+                models.MerchantSource.RULE,
+            ):
                 tx.merchant_id = tx.merchant_location_id = None
                 tx.merchant_source = models.MerchantSource.NONE
                 changed.append(tx)
             continue
-        location_id = rule.location_id if rule is not None and rule.location_id else None
+        location_id = (
+            rule.location_id if rule is not None and rule.location_id else None
+        )
         code = store_code(tx.counterparty)
         if location_id is None and code is not None:
             if (merchant_id, code) not in locations:
                 locations[(merchant_id, code)] = _store(merchant_id, code)
             location_id = locations[(merchant_id, code)]
-        if (tx.merchant_id, tx.merchant_location_id, tx.merchant_source) != (merchant_id, location_id, source):
-            tx.merchant_id, tx.merchant_location_id, tx.merchant_source = merchant_id, location_id, source
+        if (tx.merchant_id, tx.merchant_location_id, tx.merchant_source) != (
+            merchant_id,
+            location_id,
+            source,
+        ):
+            tx.merchant_id, tx.merchant_location_id, tx.merchant_source = (
+                merchant_id,
+                location_id,
+                source,
+            )
             changed.append(tx)
-    models.Transaction.objects.bulk_update(service.stamp(changed), ["merchant", "merchant_location", "merchant_source", "stored_descriptors"], batch_size=500)
+    models.Transaction.objects.bulk_update(
+        service.stamp(changed),
+        ["merchant", "merchant_location", "merchant_source", "stored_descriptors"],
+        batch_size=500,
+    )
     return len(changed)
 
 
 def _store(merchant_id: int, code: str) -> int:
     """The merchant's location for a store number, created (DISCOVERED) on first sight."""
-    existing = models.MerchantLocation.objects.filter(merchant_id=merchant_id, store_code=code).values_list("id", flat=True).first()
+    existing = (
+        models.MerchantLocation.objects.filter(merchant_id=merchant_id, store_code=code)
+        .values_list("id", flat=True)
+        .first()
+    )
     if existing is not None:
         return existing
     merchant = models.Merchant.objects.only("name").get(id=merchant_id)
     try:
         with db_transaction.atomic():
-            return models.MerchantLocation.objects.create(merchant_id=merchant_id, store_code=code, name=f"{merchant.name} {code}", source=models.LocationSource.DISCOVERED).id
+            return models.MerchantLocation.objects.create(
+                merchant_id=merchant_id,
+                store_code=code,
+                name=f"{merchant.name} {code}",
+                source=models.LocationSource.DISCOVERED,
+            ).id
     except IntegrityError:  # a concurrent sync discovered it first
-        return models.MerchantLocation.objects.get(merchant_id=merchant_id, store_code=code).id
+        return models.MerchantLocation.objects.get(
+            merchant_id=merchant_id, store_code=code
+        ).id
 
 
 def categorize_by_merchant(organization_id: int, transaction_ids: list[int]) -> int:
@@ -133,25 +189,50 @@ def categorize_by_merchant(organization_id: int, transaction_ids: list[int]) -> 
     if not transaction_ids:
         return 0
     rows = (
-        models.Transaction.objects.filter(account__organization_id=organization_id, id__in=transaction_ids, category_source__in=OVERWRITABLE)
+        models.Transaction.objects.filter(
+            account__organization_id=organization_id,
+            id__in=transaction_ids,
+            category_source__in=OVERWRITABLE,
+        )
         .select_related("merchant__category")
-        .only("id", "category_source", "stored_descriptors", *TRANSACTION_FIELDS, "merchant__category__id", "merchant__category__hidden")
+        .only(
+            "id",
+            "category_source",
+            "stored_descriptors",
+            *TRANSACTION_FIELDS,
+            "merchant__category__id",
+            "merchant__category__hidden",
+        )
     )
     changed = []
     for tx in rows:
-        category = tx.merchant.category if tx.merchant_id and tx.merchant.category_id else None
+        category = (
+            tx.merchant.category if tx.merchant_id and tx.merchant.category_id else None
+        )
         if category is not None and not category.hidden:
-            if (tx.category_id, tx.category_source) != (category.id, models.CategorySource.MERCHANT):
-                tx.category_id, tx.category_source = category.id, models.CategorySource.MERCHANT
+            if (tx.category_id, tx.category_source) != (
+                category.id,
+                models.CategorySource.MERCHANT,
+            ):
+                tx.category_id, tx.category_source = (
+                    category.id,
+                    models.CategorySource.MERCHANT,
+                )
                 changed.append(tx)
         elif tx.category_source == models.CategorySource.MERCHANT:
             tx.category_id, tx.category_source = None, models.CategorySource.NONE
             changed.append(tx)
-    models.Transaction.objects.bulk_update(service.stamp(changed), ["category", "category_source", "stored_descriptors"], batch_size=500)
+    models.Transaction.objects.bulk_update(
+        service.stamp(changed),
+        ["category", "category_source", "stored_descriptors"],
+        batch_size=500,
+    )
     return len(changed)
 
 
-def organization_rows(organization_id: int, merchant_id: int | None = None) -> list[int]:
+def organization_rows(
+    organization_id: int, merchant_id: int | None = None
+) -> list[int]:
     """Transaction ids to re-run the pipeline over after a merchant edit (all, or one merchant's)."""
     rows = models.Transaction.objects.filter(account__organization_id=organization_id)
     if merchant_id is not None:
@@ -173,11 +254,17 @@ class Candidate:
     transaction_ids: list[int] = field(default_factory=list)
 
 
-def candidates(organization_id: int, limit: int = 20, min_count: int = 2) -> list[Candidate]:
+def candidates(
+    organization_id: int, limit: int = 20, min_count: int = 2
+) -> list[Candidate]:
     """Counterparties without a merchant that recur, most frequent first."""
     groups: dict[str, list[models.Transaction]] = defaultdict(list)
     rows = (
-        models.Transaction.objects.filter(account__organization_id=organization_id, merchant__isnull=True, counterparty__isnull=False)
+        models.Transaction.objects.filter(
+            account__organization_id=organization_id,
+            merchant__isnull=True,
+            counterparty__isnull=False,
+        )
         .select_related("account")
         .defer("embedding", "raw")
         .order_by("-booking_date", "-id")
@@ -193,9 +280,21 @@ def candidates(organization_id: int, limit: int = 20, min_count: int = 2) -> lis
         totals: dict[str, Decimal] = defaultdict(Decimal)
         for tx in txs:
             totals[tx.currency] += tx.amount
-        samples = [name for name, _ in Counter(tx.counterparty for tx in txs).most_common(3)]
+        samples = [
+            name for name, _ in Counter(tx.counterparty for tx in txs).most_common(3)
+        ]
         codes = {store_code(tx.counterparty) for tx in txs} - {None}
-        out.append(Candidate(key, len(txs), dict(totals), samples, len(codes), txs[0], [tx.id for tx in txs]))
+        out.append(
+            Candidate(
+                key,
+                len(txs),
+                dict(totals),
+                samples,
+                len(codes),
+                txs[0],
+                [tx.id for tx in txs],
+            )
+        )
     out.sort(key=lambda c: (-c.count, c.key))
     return out[:limit]
 
@@ -204,7 +303,11 @@ def candidate_count(organization_id: int, min_count: int = 2) -> int:
     """How many candidates :func:`candidates` would find with no limit: one grouped query, nothing suggested."""
     per_key: Counter[str] = Counter()
     rows = (
-        models.Transaction.objects.filter(account__organization_id=organization_id, merchant__isnull=True, counterparty__isnull=False)
+        models.Transaction.objects.filter(
+            account__organization_id=organization_id,
+            merchant__isnull=True,
+            counterparty__isnull=False,
+        )
         .order_by()
         .values_list("counterparty")
         .annotate(n=Count("id"))
@@ -218,7 +321,11 @@ def candidate_count(organization_id: int, min_count: int = 2) -> int:
 
 def keys_of(transactions: list[models.Transaction]) -> list[str]:
     """The distinct match keys of some transactions (aliases for a merchant created from them)."""
-    return list(dict.fromkeys(key for key in (merchant_key(tx.counterparty) for tx in transactions) if key))
+    return list(
+        dict.fromkeys(
+            key for key in (merchant_key(tx.counterparty) for tx in transactions) if key
+        )
+    )
 
 
 # --- what a merchant adds to its transactions' embedding ----------------------------------------
@@ -227,7 +334,9 @@ def keys_of(transactions: list[models.Transaction]) -> list[str]:
 DESCRIPTION_WORDS = 12
 
 
-def build_context(merchant: models.Merchant | None, location: models.MerchantLocation | None) -> str:
+def build_context(
+    merchant: models.Merchant | None, location: models.MerchantLocation | None
+) -> str:
     """The words a transaction's merchant and place add to its embedding.
 
     The merchant's name and (short) description, its hand-set default category once (a light
@@ -238,7 +347,10 @@ def build_context(merchant: models.Merchant | None, location: models.MerchantLoc
 
     if merchant is None:
         return ""
-    parts = [merchant.name, " ".join((merchant.description or "").split()[:DESCRIPTION_WORDS])]
+    parts = [
+        merchant.name,
+        " ".join((merchant.description or "").split()[:DESCRIPTION_WORDS]),
+    ]
     category = merchant.category if merchant.category_id else None
     if category is not None and not category.hidden:
         parts.append(category.name)
@@ -255,12 +367,24 @@ def refresh_context(organization_id: int, transaction_ids: list[int]) -> int:
     if not transaction_ids:
         return 0
     rows = (
-        models.Transaction.objects.filter(account__organization_id=organization_id, id__in=transaction_ids)
+        models.Transaction.objects.filter(
+            account__organization_id=organization_id, id__in=transaction_ids
+        )
         .select_related("merchant__category", "merchant_location")
         .only(
-            "id", "counterparty", "remittance", "kind", "merchant_context", *EMBEDDING_FIELDS,
-            "merchant__name", "merchant__description", "merchant__category_id", "merchant__category__name", "merchant__category__hidden",
-            "merchant_location__name", "merchant_location__city",
+            "id",
+            "counterparty",
+            "remittance",
+            "kind",
+            "merchant_context",
+            *EMBEDDING_FIELDS,
+            "merchant__name",
+            "merchant__description",
+            "merchant__category_id",
+            "merchant__category__name",
+            "merchant__category__hidden",
+            "merchant_location__name",
+            "merchant_location__city",
         )
     )
     changed = []
@@ -270,5 +394,7 @@ def refresh_context(organization_id: int, transaction_ids: list[int]) -> int:
             tx.merchant_context = context
             changed.append(tx)
     embed_rows(changed)
-    models.Transaction.objects.bulk_update(changed, ["merchant_context", *EMBEDDING_FIELDS], batch_size=500)
+    models.Transaction.objects.bulk_update(
+        changed, ["merchant_context", *EMBEDDING_FIELDS], batch_size=500
+    )
     return len(changed)

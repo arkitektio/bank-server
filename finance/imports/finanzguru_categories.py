@@ -175,7 +175,9 @@ _FOLD = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
 def normalize(name: str) -> str:
     """Lower-cased, umlauts folded, ``&``/``und``/punctuation dropped: ``Restaurants & Cafés`` → ``restaurants cafes``."""
     folded = name.casefold().translate(_FOLD)
-    folded = "".join(c for c in unicodedata.normalize("NFKD", folded) if not unicodedata.combining(c))
+    folded = "".join(
+        c for c in unicodedata.normalize("NFKD", folded) if not unicodedata.combining(c)
+    )
     words = [w for w in _NON_WORD.split(folded) if w and w != "und"]
     return " ".join(words)
 

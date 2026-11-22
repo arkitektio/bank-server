@@ -5,7 +5,6 @@ rows — an account id from another organization is NOT_FOUND like any other.
 """
 
 import datetime
-from typing import Optional
 
 import strawberry
 import strawberry_django
@@ -18,12 +17,30 @@ from finance.forecast import forecast as forecast_logic
 from finance.graphql.utils import get_many, get_or_404
 from finance.scoping import for_org
 
-__all__ = ["balance_totals", "spending_by_category", "cashflow", "top_counterparties", "balance_history", "budget_status", "forecast"]
+__all__ = [
+    "balance_totals",
+    "spending_by_category",
+    "cashflow",
+    "top_counterparties",
+    "balance_history",
+    "budget_status",
+    "forecast",
+]
 
 
 def _scoped_window(info: Info, date_from, date_to, accounts, include_transfers: bool):  # noqa: ANN001, ANN202
-    account_ids = [a.id for a in get_many(models.BankAccount, info, accounts)] if accounts else None
-    return stats.window(for_org(models.Transaction, info), date_from, date_to, account_ids, include_transfers)
+    account_ids = (
+        [a.id for a in get_many(models.BankAccount, info, accounts)]
+        if accounts
+        else None
+    )
+    return stats.window(
+        for_org(models.Transaction, info),
+        date_from,
+        date_to,
+        account_ids,
+        include_transfers,
+    )
 
 
 def spending_by_category(
@@ -34,10 +51,24 @@ def spending_by_category(
     include_transfers: bool = False,
 ) -> list[types.CategoryTotal]:
     """Income, expense and net per category and currency over booked transactions, biggest expense first."""
-    totals = stats.spending_by_category(_scoped_window(info, date_from, date_to, accounts, include_transfers))
-    categories = {c.id: c for c in for_org(models.Category, info).filter(id__in=[t.category_id for t in totals if t.category_id])}
+    totals = stats.spending_by_category(
+        _scoped_window(info, date_from, date_to, accounts, include_transfers)
+    )
+    categories = {
+        c.id: c
+        for c in for_org(models.Category, info).filter(
+            id__in=[t.category_id for t in totals if t.category_id]
+        )
+    }
     return [
-        types.CategoryTotal(category=categories.get(t.category_id), currency=t.currency, income=t.income, expense=t.expense, net=t.net, count=t.count)  # type: ignore[arg-type]
+        types.CategoryTotal(
+            category=categories.get(t.category_id),
+            currency=t.currency,
+            income=t.income,
+            expense=t.expense,
+            net=t.net,
+            count=t.count,
+        )  # type: ignore[arg-type]
         for t in totals
     ]
 
@@ -51,8 +82,21 @@ def cashflow(
     include_transfers: bool = False,
 ) -> list[types.CashflowBucket]:
     """Income, expense and net per month (or week) and currency, oldest first."""
-    buckets = stats.cashflow(_scoped_window(info, date_from, date_to, accounts, include_transfers), granularity.value)
-    return [types.CashflowBucket(period_start=b.period_start, currency=b.currency, income=b.income, expense=b.expense, net=b.net, count=b.count) for b in buckets]
+    buckets = stats.cashflow(
+        _scoped_window(info, date_from, date_to, accounts, include_transfers),
+        granularity.value,
+    )
+    return [
+        types.CashflowBucket(
+            period_start=b.period_start,
+            currency=b.currency,
+            income=b.income,
+            expense=b.expense,
+            net=b.net,
+            count=b.count,
+        )
+        for b in buckets
+    ]
 
 
 def top_counterparties(
@@ -64,25 +108,68 @@ def top_counterparties(
     accounts: list[strawberry.ID] | None = None,
 ) -> list[types.CounterpartyTotal]:
     """Who the most money went to (``OUT``) or came from (``IN``)."""
-    rows = stats.top_counterparties(_scoped_window(info, date_from, date_to, accounts, False), direction.value, limit)
-    return [types.CounterpartyTotal(counterparty=r.counterparty, currency=r.currency, total=r.total, count=r.count) for r in rows]
+    rows = stats.top_counterparties(
+        _scoped_window(info, date_from, date_to, accounts, False),
+        direction.value,
+        limit,
+    )
+    return [
+        types.CounterpartyTotal(
+            counterparty=r.counterparty,
+            currency=r.currency,
+            total=r.total,
+            count=r.count,
+        )
+        for r in rows
+    ]
 
 
-def balance_history(info: Info, account: strawberry.ID, date_from: datetime.date, date_to: datetime.date | None = None) -> list[types.BalancePoint]:
+def balance_history(
+    info: Info,
+    account: strawberry.ID,
+    date_from: datetime.date,
+    date_to: datetime.date | None = None,
+) -> list[types.BalancePoint]:
     """The account's end-of-day balance for every day in the range (up to today by default)."""
     bank_account = get_or_404(models.BankAccount, info, account)
-    points = stats.balance_history(bank_account, date_from, date_to or datetime.date.today())
-    return [types.BalancePoint(date=p.date, amount=p.amount, currency=p.currency, reported=p.reported) for p in points]
+    points = stats.balance_history(
+        bank_account, date_from, date_to or datetime.date.today()
+    )
+    return [
+        types.BalancePoint(
+            date=p.date, amount=p.amount, currency=p.currency, reported=p.reported
+        )
+        for p in points
+    ]
 
 
-def budget_status(info: Info, month: datetime.date | None = None, category: strawberry.ID | None = None) -> list[types.BudgetStatus]:
+def budget_status(
+    info: Info,
+    month: datetime.date | None = None,
+    category: strawberry.ID | None = None,
+) -> list[types.BudgetStatus]:
     """Budgeted vs. spent for every budget active in a month (the current one by default); `category`: only that category's budgets."""
     month = month or datetime.date.today()
     budgets = for_org(models.Budget, info)
     if category is not None:
         budgets = budgets.filter(category_id=category)
-    rows = budget_logic.budget_status(budgets, for_org(models.Transaction, info), info.context.request.organization.id, month)
-    return [types.BudgetStatus(budget=r.budget, month=r.month, budgeted=r.budgeted, spent=r.spent, remaining=r.remaining, ratio=r.ratio) for r in rows]  # type: ignore[arg-type]
+    rows = budget_logic.budget_status(
+        budgets,
+        for_org(models.Transaction, info),
+        info.context.request.organization.id,
+        month,
+    )
+    return [
+        types.BudgetStatus(
+            budget=r.budget,  # type: ignore[arg-type]
+            month=r.month,
+            budgeted=r.budgeted,
+            spent=r.spent,
+            remaining=r.remaining,
+            ratio=r.ratio,
+        )
+        for r in rows
+    ]
 
 
 def forecast(
@@ -106,12 +193,25 @@ def forecast(
         budgets=for_org(models.Budget, info) if include_budgets else None,
         transactions=for_org(models.Transaction, info) if include_budgets else None,
     )
-    return [types.ForecastPoint(date=p.date, amount=p.amount, currency=p.currency) for p in points]
+    return [
+        types.ForecastPoint(date=p.date, amount=p.amount, currency=p.currency)
+        for p in points
+    ]
 
 
-def balance_totals(info: Info, filters: Optional[filters_module.BankAccountFilter] = None) -> list[types.BalanceTotal]:
+def balance_totals(
+    info: Info, filters: filters_module.BankAccountFilter | None = None
+) -> list[types.BalanceTotal]:
     """The latest balance of every visible account (or the filtered ones), summed per account kind and currency."""
     accounts = for_org(models.BankAccount, info)
     if filters is not None:
         accounts = strawberry_django.filters.apply(filters, accounts, info)
-    return [types.BalanceTotal(kind=enums.AccountKind(t.kind), currency=t.currency, amount=t.amount, accounts=t.accounts) for t in stats.balance_totals(accounts)]
+    return [
+        types.BalanceTotal(
+            kind=enums.AccountKind(t.kind),
+            currency=t.currency,
+            amount=t.amount,
+            accounts=t.accounts,
+        )
+        for t in stats.balance_totals(accounts)
+    ]

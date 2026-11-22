@@ -28,7 +28,15 @@ from finance.providers.registry import backend_for, kind_of, provider_of, usable
 if TYPE_CHECKING:
     from authentikate.models import Organization, User
 
-__all__ = ["AuthSession", "CONNECTION", "describe", "find", "complete", "resume", "cancel"]
+__all__ = [
+    "AuthSession",
+    "CONNECTION",
+    "describe",
+    "find",
+    "complete",
+    "resume",
+    "cancel",
+]
 
 #: What a finished login links, under the identifier the app opens a connection's page by (its
 #: manifest's; the hub contract in ``bank_server.contract`` calls the same model ``@bank/bankconnection``).
@@ -39,7 +47,11 @@ _TIMED_OUT = "The login was not completed in time."
 
 def _step(connection: models.BankConnection) -> str | None:
     """What a login is still waiting for after its first approval (None before it)."""
-    return models.LinkStep.MFA.value if connection.link_step == models.LinkStep.MFA else None
+    return (
+        models.LinkStep.MFA.value
+        if connection.link_step == models.LinkStep.MFA
+        else None
+    )
 
 
 def _status(connection: models.BankConnection) -> AuthStatus:
@@ -49,8 +61,17 @@ def _status(connection: models.BankConnection) -> AuthStatus:
         return "CANCELLED"
     if connection.status == models.ConnectionStatus.PENDING:
         # Nothing flips a login on a timer: past its time with no approval, it reads as expired.
-        return "EXPIRED" if _step(connection) is None and connection.pending_expires_at < timezone.now() else "PENDING"
-    return "EXPIRED" if connection.last_error_code == models.BankErrorCode.CODE_EXPIRED else "FAILED"
+        return (
+            "EXPIRED"
+            if _step(connection) is None
+            and connection.pending_expires_at < timezone.now()
+            else "PENDING"
+        )
+    return (
+        "EXPIRED"
+        if connection.last_error_code == models.BankErrorCode.CODE_EXPIRED
+        else "FAILED"
+    )
 
 
 def describe(connection: models.BankConnection) -> AuthSession:
@@ -59,31 +80,58 @@ def describe(connection: models.BankConnection) -> AuthSession:
     session.status = _status(connection)
     session.step = _step(connection) if session.status == "PENDING" else None
     if session.status == "DONE":
-        session.result = AuthResult(identifier=CONNECTION, id=str(connection.id), label=connection.aspsp_name)
+        session.result = AuthResult(
+            identifier=CONNECTION, id=str(connection.id), label=connection.aspsp_name
+        )
     elif session.status in ("FAILED", "EXPIRED"):
-        session.error_code = connection.last_error_code or (models.BankErrorCode.CODE_EXPIRED.value if session.status == "EXPIRED" else None)
-        session.error_message = connection.last_error or (_TIMED_OUT if session.status == "EXPIRED" else "The provider refused the login.")
+        session.error_code = connection.last_error_code or (
+            models.BankErrorCode.CODE_EXPIRED.value
+            if session.status == "EXPIRED"
+            else None
+        )
+        session.error_message = connection.last_error or (
+            _TIMED_OUT
+            if session.status == "EXPIRED"
+            else "The provider refused the login."
+        )
     return session
 
 
-async def find(organization: "Organization", user: "User", state: str) -> models.BankConnection:
+async def find(
+    organization: "Organization", user: "User", state: str
+) -> models.BankConnection:
     """The login with ``state`` that ``user`` started in ``organization``; anything else is the same as no login."""
-    connection = await models.BankConnection.objects.filter(organization_id=organization.id, creator_id=user.id, state=state).afirst()
+    connection = await models.BankConnection.objects.filter(
+        organization_id=organization.id, creator_id=user.id, state=state
+    ).afirst()
     if connection is None:
-        raise LinkError("No login with this state: it belongs to another login attempt, another member or another organization.")
+        raise LinkError(
+            "No login with this state: it belongs to another login attempt, another member or another organization."
+        )
     return connection
 
 
 def _refuse(connection_id: int, message: str) -> None:
     from bank_server.service import restore_connection  # it imports finance.models
 
-    models.BankConnection.objects.filter(id=connection_id, status=models.ConnectionStatus.PENDING).update(
-        status=models.ConnectionStatus.FAILED, last_error=message[:2000], last_error_code=models.BankErrorCode.LOGIN_REFUSED, secret=None, token_lease_until=None
+    models.BankConnection.objects.filter(
+        id=connection_id, status=models.ConnectionStatus.PENDING
+    ).update(
+        status=models.ConnectionStatus.FAILED,
+        last_error=message[:2000],
+        last_error_code=models.BankErrorCode.LOGIN_REFUSED,
+        secret=None,
+        token_lease_until=None,
     )
     restore_connection(connection_id)
 
 
-async def complete(connection: models.BankConnection, code: str | None = None, error: str | None = None, error_description: str | None = None) -> AuthSession:
+async def complete(
+    connection: models.BankConnection,
+    code: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+) -> AuthSession:
     """Finish (REDIRECT) or advance (POLL) a login; a settled one is answered again as it is.
 
     ``error`` is the provider's own refusal, as its redirect carried it: the login ends FAILED
@@ -91,11 +139,15 @@ async def complete(connection: models.BankConnection, code: str | None = None, e
     """
     if connection.status == models.ConnectionStatus.PENDING:
         if error or error_description:
-            await database_sync_to_async(_refuse)(connection.id, error_description or error or "")
+            await database_sync_to_async(_refuse)(
+                connection.id, error_description or error or ""
+            )
             await connection.arefresh_from_db()
         else:
             backend = usable(await provider_of(connection), "This login")
-            connection = await backend.complete_link(connection, LinkCompletion(code=code))  # raises only while the login stays PENDING
+            connection = await backend.complete_link(
+                connection, LinkCompletion(code=code)
+            )  # raises only while the login stays PENDING
         await announce_auth(connection.state)
     return describe(connection)
 
@@ -108,8 +160,13 @@ def resume(connection: models.BankConnection) -> AuthSession:
 def _cancel(connection_id: int) -> None:
     from bank_server.service import restore_connection  # it imports finance.models
 
-    models.BankConnection.objects.filter(id=connection_id, status=models.ConnectionStatus.PENDING).update(
-        status=models.ConnectionStatus.CANCELLED, secret=None, token_expires_at=None, token_lease_until=None
+    models.BankConnection.objects.filter(
+        id=connection_id, status=models.ConnectionStatus.PENDING
+    ).update(
+        status=models.ConnectionStatus.CANCELLED,
+        secret=None,
+        token_expires_at=None,
+        token_lease_until=None,
     )
     restore_connection(connection_id)
 

@@ -26,11 +26,25 @@ def _log(request: web.Request, **extra) -> None:
 async def figi(request: web.Request) -> web.Response:
     jobs = await request.json()
     _log(request, jobs=jobs)
-    return web.json_response([{"data": STATE["listings"][job["idValue"]]} if job["idValue"] in STATE["listings"] else {"warning": "No identifier found."} for job in jobs])
+    return web.json_response(
+        [
+            {"data": STATE["listings"][job["idValue"]]}
+            if job["idValue"] in STATE["listings"]
+            else {"warning": "No identifier found."}
+            for job in jobs
+        ]
+    )
 
 
-def _window(points: list, start: datetime.date | None, end: datetime.date | None) -> list:
-    return [(d, c) for d, c in points if (start is None or datetime.date.fromisoformat(d) >= start) and (end is None or datetime.date.fromisoformat(d) <= end)]
+def _window(
+    points: list, start: datetime.date | None, end: datetime.date | None
+) -> list:
+    return [
+        (d, c)
+        for d, c in points
+        if (start is None or datetime.date.fromisoformat(d) >= start)
+        and (end is None or datetime.date.fromisoformat(d) <= end)
+    ]
 
 
 async def yahoo_chart(request: web.Request) -> web.Response:
@@ -38,25 +52,79 @@ async def yahoo_chart(request: web.Request) -> web.Response:
     _log(request, symbol=symbol)
     series = STATE["series"].get(f"YAHOO:{symbol}")
     if series is None:
-        return web.json_response({"chart": {"result": None, "error": {"code": "Not Found", "description": "No data found, symbol may be delisted"}}}, status=404)
+        return web.json_response(
+            {
+                "chart": {
+                    "result": None,
+                    "error": {
+                        "code": "Not Found",
+                        "description": "No data found, symbol may be delisted",
+                    },
+                }
+            },
+            status=404,
+        )
     q = request.query
-    start = datetime.datetime.fromtimestamp(int(q["period1"]), datetime.timezone.utc).date() if "period1" in q else None
-    end = datetime.datetime.fromtimestamp(int(q["period2"]), datetime.timezone.utc).date() - datetime.timedelta(days=1) if "period2" in q else None
+    start = (
+        datetime.datetime.fromtimestamp(int(q["period1"]), datetime.UTC).date()
+        if "period1" in q
+        else None
+    )
+    end = (
+        datetime.datetime.fromtimestamp(int(q["period2"]), datetime.UTC).date()
+        - datetime.timedelta(days=1)
+        if "period2" in q
+        else None
+    )
     points = _window(series["points"], start, end) if start else series["points"][-1:]
-    stamps = [int(datetime.datetime.combine(datetime.date.fromisoformat(d), datetime.time(7), tzinfo=datetime.timezone.utc).timestamp()) for d, _ in points]
+    stamps = [
+        int(
+            datetime.datetime.combine(
+                datetime.date.fromisoformat(d), datetime.time(7), tzinfo=datetime.UTC
+            ).timestamp()
+        )
+        for d, _ in points
+    ]
     last = series["points"][-1]
-    meta = {"currency": series["currency"], "symbol": symbol, "longName": series.get("name"), "regularMarketPrice": last[1], "regularMarketTime": stamps[-1] if stamps else None}
-    return web.json_response({"chart": {"result": [{"meta": meta, "timestamp": stamps, "indicators": {"quote": [{"close": [c for _, c in points]}]}}], "error": None}})
+    meta = {
+        "currency": series["currency"],
+        "symbol": symbol,
+        "longName": series.get("name"),
+        "regularMarketPrice": last[1],
+        "regularMarketTime": stamps[-1] if stamps else None,
+    }
+    return web.json_response(
+        {
+            "chart": {
+                "result": [
+                    {
+                        "meta": meta,
+                        "timestamp": stamps,
+                        "indicators": {"quote": [{"close": [c for _, c in points]}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+    )
 
 
 def _td(request: web.Request):  # noqa: ANN202
     q = request.query
     _log(request)
     if q.get("apikey") != API_KEY:
-        return None, web.json_response({"code": 401, "message": "**apikey** parameter is incorrect or not specified.", "status": "error"})
+        return None, web.json_response(
+            {
+                "code": 401,
+                "message": "**apikey** parameter is incorrect or not specified.",
+                "status": "error",
+            }
+        )
     series = STATE["series"].get(f"TWELVEDATA:{q['symbol']}@{q.get('mic_code', '')}")
     if series is None:
-        return None, web.json_response({"code": 404, "message": "**symbol** not found", "status": "error"})
+        return None, web.json_response(
+            {"code": 404, "message": "**symbol** not found", "status": "error"}
+        )
     return series, None
 
 
@@ -65,8 +133,22 @@ async def td_series(request: web.Request) -> web.Response:
     if error:
         return error
     q = request.query
-    points = _window(series["points"], datetime.date.fromisoformat(q["start_date"]), datetime.date.fromisoformat(q["end_date"]))
-    return web.json_response({"meta": {"symbol": q["symbol"], "currency": series["currency"], "mic_code": q.get("mic_code")}, "values": [{"datetime": d, "close": str(c)} for d, c in points], "status": "ok"})
+    points = _window(
+        series["points"],
+        datetime.date.fromisoformat(q["start_date"]),
+        datetime.date.fromisoformat(q["end_date"]),
+    )
+    return web.json_response(
+        {
+            "meta": {
+                "symbol": q["symbol"],
+                "currency": series["currency"],
+                "mic_code": q.get("mic_code"),
+            },
+            "values": [{"datetime": d, "close": str(c)} for d, c in points],
+            "status": "ok",
+        }
+    )
 
 
 async def td_quote(request: web.Request) -> web.Response:
@@ -74,7 +156,19 @@ async def td_quote(request: web.Request) -> web.Response:
     if error:
         return error
     day, close = series["points"][-1]
-    return web.json_response({"symbol": request.query["symbol"], "name": series.get("name"), "currency": series["currency"], "close": str(close), "timestamp": int(datetime.datetime.fromisoformat(day).replace(tzinfo=datetime.timezone.utc).timestamp())})
+    return web.json_response(
+        {
+            "symbol": request.query["symbol"],
+            "name": series.get("name"),
+            "currency": series["currency"],
+            "close": str(close),
+            "timestamp": int(
+                datetime.datetime.fromisoformat(day)
+                .replace(tzinfo=datetime.UTC)
+                .timestamp()
+            ),
+        }
+    )
 
 
 async def admin_listings(request: web.Request) -> web.Response:

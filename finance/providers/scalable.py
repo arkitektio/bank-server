@@ -15,7 +15,16 @@ from django.utils import timezone
 from pydantic import BaseModel
 
 from finance import models
-from finance.providers.base import AuthSession, BackendBase, Finish, Institution, LinkCompletion, LinkRequest, ProviderCheck, PsuHeaders
+from finance.providers.base import (
+    AuthSession,
+    BackendBase,
+    Finish,
+    Institution,
+    LinkCompletion,
+    LinkRequest,
+    ProviderCheck,
+    PsuHeaders,
+)
 from finance.scalable import linking
 from finance.scalable import sync as scalable_sync
 from finance.scalable.client import ScalableClient, Unauthorized
@@ -38,9 +47,13 @@ class ScalableBackend(BackendBase):
 
     kind: ClassVar[models.Provider] = models.Provider.SCALABLE
     label: ClassVar[str] = "Scalable Capital"
-    description: ClassVar[str] = "Broker, depot and overnight savings through Scalable's official CLI login. Enable Profile > Security > Agentic Investing at Scalable first."
+    description: ClassVar[str] = (
+        "Broker, depot and overnight savings through Scalable's official CLI login. Enable Profile > Security > Agentic Investing at Scalable first."
+    )
     finish: ClassVar[Finish] = "POLL"
-    capabilities: ClassVar[frozenset[models.ProviderCapability]] = frozenset(models.ProviderCapability)
+    capabilities: ClassVar[frozenset[models.ProviderCapability]] = frozenset(
+        models.ProviderCapability
+    )
     has_institutions: ClassVar[bool] = False
     default_daily_sync_limit: ClassVar[int | None] = None
 
@@ -52,11 +65,15 @@ class ScalableBackend(BackendBase):
         """Scalable is one institution; there is nothing to pick."""
         return []
 
-    async def start_link(self, organization: "Organization", creator: "User", request: LinkRequest) -> models.BankConnection:
+    async def start_link(
+        self, organization: "Organization", creator: "User", request: LinkRequest
+    ) -> models.BankConnection:
         """Start a device login."""
         return await linking.start_scalable_link(self.provider, organization, creator)
 
-    async def complete_link(self, connection: models.BankConnection, completion: LinkCompletion) -> models.BankConnection:
+    async def complete_link(
+        self, connection: models.BankConnection, completion: LinkCompletion
+    ) -> models.BankConnection:
         """Advance the login by one step; PENDING until the user approved everything."""
         return await linking.complete_scalable_link(connection)
 
@@ -72,31 +89,44 @@ class ScalableBackend(BackendBase):
         return AuthSession(
             connection=connection,
             state=connection.state,
-            open_url=raw.get("verification_uri_complete") or raw.get("verification_uri") or "",
+            open_url=raw.get("verification_uri_complete")
+            or raw.get("verification_uri")
+            or "",
             expires_at=connection.pending_expires_at,
             finish=cls.finish,
             interval=connection.link_poll_interval,
             user_code=raw.get("user_code"),
         )
 
-    async def sync(self, syncer: models.AccountSyncer, since: date | None, psu_headers: PsuHeaders | None) -> "SyncResult":
+    async def sync(
+        self,
+        syncer: models.AccountSyncer,
+        since: date | None,
+        psu_headers: PsuHeaders | None,
+    ) -> "SyncResult":
         """Fetch the pot (the parts switched on) and upsert it; then the depot's prices, if those are on."""
         from finance.sync import SyncResult
 
         if syncer.connection_id is None:
             raise AssertionError("a syncer is only synced through its connection")
         # An order can stay pending for weeks: page back far enough to see every pending row again.
-        oldest_pending = await syncer.transactions.filter(status=models.TransactionStatus.PENDING).aaggregate(oldest=Min("booking_date"))
+        oldest_pending = await syncer.transactions.filter(
+            status=models.TransactionStatus.PENDING
+        ).aaggregate(oldest=Min("booking_date"))
         if since and oldest_pending["oldest"]:
             since = min(since, oldest_pending["oldest"])
         async with ScalableClient() as client:
             session = await session_for(syncer.connection_id, client)
             try:
-                fetched = await scalable_sync.fetch(syncer, session, client, since, self._enabled)
+                fetched = await scalable_sync.fetch(
+                    syncer, session, client, since, self._enabled
+                )
             except Unauthorized:
                 # As the CLI does: refresh once and retry. Only a failed refresh (invalid_grant) means relogin.
                 session = await refreshed_session(syncer.connection_id, client, session)
-                fetched = await scalable_sync.fetch(syncer, session, client, since, self._enabled)
+                fetched = await scalable_sync.fetch(
+                    syncer, session, client, since, self._enabled
+                )
         result = SyncResult(account_id=syncer.account_id)
         await database_sync_to_async(scalable_sync.persist)(syncer.id, fetched, result)
         if fetched.holdings and self.has(models.ProviderCapability.PRICES):
@@ -104,10 +134,28 @@ class ScalableBackend(BackendBase):
             from finance.prices import service as prices
 
             try:
-                isins = sorted({item["isin"] for item in fetched.holdings if item.get("isin")})
+                isins = sorted(
+                    {item["isin"] for item in fetched.holdings if item.get("isin")}
+                )
                 today = timezone.now().date()
-                await prices.refresh(syncer.organization_id, isins, today - timedelta(days=31), today, only=[models.PriceSource.SCALABLE])
+                await prices.refresh(
+                    syncer.organization_id,
+                    isins,
+                    today - timedelta(days=31),
+                    today,
+                    only=[models.PriceSource.SCALABLE],
+                )
             except Exception:
-                logger.warning("Refreshing prices after the depot sync of account %s failed.", syncer.account_id, exc_info=True)
-        logger.info("Synced Scalable account %s: %s new, %s updated, %s holdings", syncer.account_id, result.created, result.updated, result.holdings)
+                logger.warning(
+                    "Refreshing prices after the depot sync of account %s failed.",
+                    syncer.account_id,
+                    exc_info=True,
+                )
+        logger.info(
+            "Synced Scalable account %s: %s new, %s updated, %s holdings",
+            syncer.account_id,
+            result.created,
+            result.updated,
+            result.holdings,
+        )
         return result

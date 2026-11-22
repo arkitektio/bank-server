@@ -41,9 +41,13 @@ def forecast(
     today = timezone.now().date()
     end = today + timedelta(days=max(1, min(horizon_days, 3 * 365)))
 
-    statuses = [models.RecurringStatus.CONFIRMED] + ([models.RecurringStatus.DETECTED] if include_detected else [])
+    statuses = [models.RecurringStatus.CONFIRMED] + (
+        [models.RecurringStatus.DETECTED] if include_detected else []
+    )
     changes: dict[date, Decimal] = {}
-    for pattern in account.recurring_payments.filter(status__in=statuses, currency=anchor.currency):
+    for pattern in account.recurring_payments.filter(
+        status__in=statuses, currency=anchor.currency
+    ):
         occurrence = pattern.next_expected
         if occurrence <= today:
             # Overdue by less than one interval: assume it still comes, tomorrow. Longer
@@ -61,7 +65,12 @@ def forecast(
         month = today.replace(day=1)
         while month <= end:
             first, last = month_bounds(month)
-            month_statuses = budget_status(budgets.filter(currency=anchor.currency), transactions.filter(account=account), account.organization_id, month)
+            month_statuses = budget_status(
+                budgets.filter(currency=anchor.currency),
+                transactions.filter(account=account),
+                account.organization_id,
+                month,
+            )
             span_start = max(first, today + timedelta(days=1))
             days = (last - span_start).days + 1
             for status in month_statuses:

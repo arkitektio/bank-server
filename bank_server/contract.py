@@ -7,24 +7,64 @@ the same commit, and no installer has to learn of it.
 
 from __future__ import annotations
 
-from arkitekt_service.contract import JSON, Contract, Description, Descriptor, Facts, Hosts, Job, Needs, Offers, Role, Scope, Signal, Start, Structure, blocks
+from arkitekt_service.contract import (
+    JSON,
+    Contract,
+    Description,
+    Descriptor,
+    Facts,
+    Hosts,
+    Job,
+    Needs,
+    Offers,
+    Role,
+    Scope,
+    Signal,
+    Start,
+    Structure,
+    blocks,
+)
 
 from bank_server.configuration import Settings
 
 #: What an app may do here on a user's behalf: defined at the coordination server when the hub
 #: enrols. Every root field of the schema asks for one of them (`AuthExtension(scopes=...)`).
 SCOPES = [
-    Scope(key="bank_read", description="See your linked accounts, balances, transactions, categories, budgets and recurring payments."),
-    Scope(key="bank_write", description="Categorise and annotate transactions, edit merchants, rules, budgets and recurring payments, and import statements."),
-    Scope(key="bank_link", description="Connect and disconnect bank accounts and sync them with your bank; this goes through your bank's sign-in."),
-    Scope(key="bank_providers", description="Set up the banking providers (Enable Banking, Scalable) that accounts can be linked through."),
-    Scope(key="bank_all", description="Do everything in Bank on your behalf.", is_all_scope=True),
+    Scope(
+        key="bank_read",
+        description="See your linked accounts, balances, transactions, categories, budgets and recurring payments.",
+    ),
+    Scope(
+        key="bank_write",
+        description="Categorise and annotate transactions, edit merchants, rules, budgets and recurring payments, and import statements.",
+    ),
+    Scope(
+        key="bank_link",
+        description="Connect and disconnect bank accounts and sync them with your bank; this goes through your bank's sign-in.",
+    ),
+    Scope(
+        key="bank_providers",
+        description="Set up the banking providers (Enable Banking, Scalable) that accounts can be linked through.",
+    ),
+    Scope(
+        key="bank_all",
+        description="Do everything in Bank on your behalf.",
+        is_all_scope=True,
+    ),
 ]
 
 #: What a member of an organization may do here.
 ROLES = [
-    Role(key="bank_admin", description="Full control of Bank in this organization, including banking providers.", is_admin_role=True),
-    Role(key="bank_editor", description="Link accounts and organise your transactions, budgets and categories.", is_default_role=True),
+    Role(
+        key="bank_admin",
+        description="Full control of Bank in this organization, including banking providers.",
+        is_admin_role=True,
+    ),
+    Role(
+        key="bank_editor",
+        description="Link accounts and organise your transactions, budgets and categories.",
+        is_default_role=True,
+    ),
 ]
 
 #: The role every write asks for, and the one that alone sets up providers.
@@ -38,19 +78,55 @@ UPDATED_TRANSACTIONS = "@bank/updated_transactions"
 
 #: Money in or out, from the sign of the amount: OUT when it is negative, IN otherwise (zero
 #: included: no money left the account). A category rule's IN and OUT match neither for zero.
-_DIRECTION = Descriptor(key="@bank/direction", type="STRING", description="Whether the money comes in or goes out of the account: IN (money received; zero or positive amount) or OUT (money paid; negative amount)")
-_CURRENCY = Descriptor(key="@bank/currency", type="STRING", description="Its currency as an ISO 4217 code (EUR, USD, …), empty when unknown")
+_DIRECTION = Descriptor(
+    key="@bank/direction",
+    type="STRING",
+    description="Whether the money comes in or goes out of the account: IN (money received; zero or positive amount) or OUT (money paid; negative amount)",
+)
+_CURRENCY = Descriptor(
+    key="@bank/currency",
+    type="STRING",
+    description="Its currency as an ISO 4217 code (EUR, USD, …), empty when unknown",
+)
 
 CONNECTION_DESCRIPTORS = [
-    Descriptor(key="@bank/status", type="STRING", description="Where the bank consent is: PENDING (waiting for approval at the bank), ACTIVE, EXPIRED, REVOKED, FAILED or CANCELLED"),
-    Descriptor(key="@bank/provider", type="STRING", description="The provider the bank is reached through: ENABLEBANKING (an online banking consent) or SCALABLE (a Scalable Capital login)"),
-    Descriptor(key="@bank/country", type="STRING", description="The bank's ISO country code, empty when none"),
-    Descriptor(key="@bank/link_step", type="STRING", description="Where a broker login is: DEVICE (waiting for the login code), MFA (waiting for the second factor) or DONE, empty for a consent that has no steps"),
-    Descriptor(key="@bank/error_code", type="STRING", description="The kind of the last error (a BankErrorCode such as CONSENT_EXPIRED), empty when there was none"),
+    Descriptor(
+        key="@bank/status",
+        type="STRING",
+        description="Where the bank consent is: PENDING (waiting for approval at the bank), ACTIVE, EXPIRED, REVOKED, FAILED or CANCELLED",
+    ),
+    Descriptor(
+        key="@bank/provider",
+        type="STRING",
+        description="The provider the bank is reached through: ENABLEBANKING (an online banking consent) or SCALABLE (a Scalable Capital login)",
+    ),
+    Descriptor(
+        key="@bank/country",
+        type="STRING",
+        description="The bank's ISO country code, empty when none",
+    ),
+    Descriptor(
+        key="@bank/link_step",
+        type="STRING",
+        description="Where a broker login is: DEVICE (waiting for the login code), MFA (waiting for the second factor) or DONE, empty for a consent that has no steps",
+    ),
+    Descriptor(
+        key="@bank/error_code",
+        type="STRING",
+        description="The kind of the last error (a BankErrorCode such as CONSENT_EXPIRED), empty when there was none",
+    ),
 ]
 PROVIDER_DESCRIPTORS = [
-    Descriptor(key="@bank/provider", type="STRING", description="The kind of provider: ENABLEBANKING (open banking) or SCALABLE (Scalable Capital)"),
-    Descriptor(key="@bank/enabled", type="BOOL", description="Whether it is switched on: it starts new bank links and syncs"),
+    Descriptor(
+        key="@bank/provider",
+        type="STRING",
+        description="The kind of provider: ENABLEBANKING (open banking) or SCALABLE (Scalable Capital)",
+    ),
+    Descriptor(
+        key="@bank/enabled",
+        type="BOOL",
+        description="Whether it is switched on: it starts new bank links and syncs",
+    ),
     Descriptor(
         key="@bank/capabilities",
         type="LIST",
@@ -58,37 +134,97 @@ PROVIDER_DESCRIPTORS = [
     ),
 ]
 ACCOUNT_DESCRIPTORS = [
-    Descriptor(key="@bank/kind", type="STRING", description="What the account holds: CASH (checking, card or clearing account), DEPOT (securities) or SAVINGS"),
+    Descriptor(
+        key="@bank/kind",
+        type="STRING",
+        description="What the account holds: CASH (checking, card or clearing account), DEPOT (securities) or SAVINGS",
+    ),
     _CURRENCY,
-    Descriptor(key="@bank/has_iban", type="BOOL", description="Whether its IBAN (the international bank account number) is known"),
+    Descriptor(
+        key="@bank/has_iban",
+        type="BOOL",
+        description="Whether its IBAN (the international bank account number) is known",
+    ),
 ]
 IMPORT_DESCRIPTORS = [
-    Descriptor(key="@bank/status", type="STRING", description="Where the statement import is: PREVIEWED (parsed, nothing written yet), APPLIED or FAILED"),
-    Descriptor(key="@bank/source", type="STRING", description="The app or file format the statement export came from (FINANZGURU)"),
+    Descriptor(
+        key="@bank/status",
+        type="STRING",
+        description="Where the statement import is: PREVIEWED (parsed, nothing written yet), APPLIED or FAILED",
+    ),
+    Descriptor(
+        key="@bank/source",
+        type="STRING",
+        description="The app or file format the statement export came from (FINANZGURU)",
+    ),
 ]
 RECURRING_DESCRIPTORS = [
-    Descriptor(key="@bank/status", type="STRING", description="How a user judged the recurring payment: DETECTED (not reviewed yet), CONFIRMED or IGNORED"),
-    Descriptor(key="@bank/interval_days", type="INT", description="The number of days between two payments"),
+    Descriptor(
+        key="@bank/status",
+        type="STRING",
+        description="How a user judged the recurring payment: DETECTED (not reviewed yet), CONFIRMED or IGNORED",
+    ),
+    Descriptor(
+        key="@bank/interval_days",
+        type="INT",
+        description="The number of days between two payments",
+    ),
     _CURRENCY,
     _DIRECTION,
 ]
 CATEGORY_DESCRIPTORS = [
-    Descriptor(key="@bank/kind", type="STRING", description="Whether its money is an expense, income or a transfer between own accounts"),
-    Descriptor(key="@bank/custom", type="BOOL", description="Whether the organization made it (true) or it is a base category of the taxonomy (false)"),
+    Descriptor(
+        key="@bank/kind",
+        type="STRING",
+        description="Whether its money is an expense, income or a transfer between own accounts",
+    ),
+    Descriptor(
+        key="@bank/custom",
+        type="BOOL",
+        description="Whether the organization made it (true) or it is a base category of the taxonomy (false)",
+    ),
 ]
 MERCHANT_DESCRIPTORS = [
-    Descriptor(key="@bank/online", type="BOOL", description="Whether it is an online shop only, with no physical stores"),
+    Descriptor(
+        key="@bank/online",
+        type="BOOL",
+        description="Whether it is an online shop only, with no physical stores",
+    ),
 ]
 BUDGET_DESCRIPTORS = [_CURRENCY]
 TRANSACTION_DESCRIPTORS = [
-    Descriptor(key="@bank/status", type="STRING", description="Its booking status at the bank: BOOK (booked), PDNG (pending) or OTHR"),
-    Descriptor(key="@bank/kind", type="STRING", description="The broker's transaction type (BUY, SELL, DEPOSIT, …), empty for a plain bank transaction"),
+    Descriptor(
+        key="@bank/status",
+        type="STRING",
+        description="Its booking status at the bank: BOOK (booked), PDNG (pending) or OTHR",
+    ),
+    Descriptor(
+        key="@bank/kind",
+        type="STRING",
+        description="The broker's transaction type (BUY, SELL, DEPOSIT, …), empty for a plain bank transaction",
+    ),
     _CURRENCY,
     _DIRECTION,
-    Descriptor(key="@bank/is_transfer", type="BOOL", description="Whether it moves money between the organization's own accounts (left out of stats)"),
-    Descriptor(key="@bank/categorized", type="BOOL", description="Whether it has a category (groceries, rent, salary, …)"),
-    Descriptor(key="@bank/has_merchant", type="BOOL", description="Whether it is linked to a merchant (the shop or payee)"),
-    Descriptor(key="@bank/has_security", type="BOOL", description="Whether it trades or pays out a security such as a stock or ETF (its ISIN is known)"),
+    Descriptor(
+        key="@bank/is_transfer",
+        type="BOOL",
+        description="Whether it moves money between the organization's own accounts (left out of stats)",
+    ),
+    Descriptor(
+        key="@bank/categorized",
+        type="BOOL",
+        description="Whether it has a category (groceries, rent, salary, …)",
+    ),
+    Descriptor(
+        key="@bank/has_merchant",
+        type="BOOL",
+        description="Whether it is linked to a merchant (the shop or payee)",
+    ),
+    Descriptor(
+        key="@bank/has_security",
+        type="BOOL",
+        description="Whether it trades or pays out a security such as a stock or ETF (its ISIN is known)",
+    ),
 ]
 
 
@@ -171,7 +307,11 @@ HOSTS = Hosts(
         Signal(
             identifier="@bank/bankaccount",
             kinds=["CREATED", "UPDATED"],
-            descriptors=[*_keys(ACCOUNT_DESCRIPTORS), NEW_TRANSACTIONS, UPDATED_TRANSACTIONS],
+            descriptors=[
+                *_keys(ACCOUNT_DESCRIPTORS),
+                NEW_TRANSACTIONS,
+                UPDATED_TRANSACTIONS,
+            ],
             description="A bank account appeared, changed, or was synced with its bank (then with the number of new and updated transactions).",
         ),
         Signal(
@@ -234,8 +374,20 @@ contract = Contract(
         name="bank",
         identifier="live.arkitekt.bank",
         summary="Bank accounts, transactions and budgets.",
-        needs=Needs(scopes=SCOPES, roles=ROLES, storage=["bigfile"], instance_key=True, peers=["rekuest"], secrets=["fernet"]),
-        offers=Offers(endpoints={"rekuest_service": "_rekuest/service", "rekuest_hook": "_rekuest/hook"}),
+        needs=Needs(
+            scopes=SCOPES,
+            roles=ROLES,
+            storage=["bigfile"],
+            instance_key=True,
+            peers=["rekuest"],
+            secrets=["fernet"],
+        ),
+        offers=Offers(
+            endpoints={
+                "rekuest_service": "_rekuest/service",
+                "rekuest_hook": "_rekuest/hook",
+            }
+        ),
         requires={"rekuest": ">=6"},
         hosts=HOSTS,
     ),
@@ -243,11 +395,27 @@ contract = Contract(
     render=render,
     # How this service is started: there is no script beside it. `arkitekt-service serve`
     # (and `debug`) become these, so they get the container's signals themselves.
-    serve=Start(("daphne", "-b", "0.0.0.0", "-p", "80", "--websocket_timeout", "-1", "bank_server.asgi:application")),
+    serve=Start(
+        (
+            "daphne",
+            "-b",
+            "0.0.0.0",
+            "-p",
+            "80",
+            "--websocket_timeout",
+            "-1",
+            "bank_server.asgi:application",
+        )
+    ),
     debug=Start(("python", "manage.py", "runserver", "0.0.0.0:80")),
     jobs={
-        "ensureadmin": Job(("ensureadmin",), "Create the operator account the config names"),
-        "restore_descriptors": Job(("restore_descriptors",), "Store the descriptors of every object that misses one (--all: of every row)"),
+        "ensureadmin": Job(
+            ("ensureadmin",), "Create the operator account the config names"
+        ),
+        "restore_descriptors": Job(
+            ("restore_descriptors",),
+            "Store the descriptors of every object that misses one (--all: of every row)",
+        ),
     },
     setup=("ensureadmin", "restore_descriptors"),
 )

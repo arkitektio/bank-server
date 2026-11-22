@@ -55,7 +55,13 @@ ALLOWED = {
 }
 
 STATE: dict = {
-    "config": {"token_ttl": 1200, "interval": 5, "graphql_nonce_challenges": 0, "graphql_rejections": 0, "graphql_rate_limited": 0},
+    "config": {
+        "token_ttl": 1200,
+        "interval": 5,
+        "graphql_nonce_challenges": 0,
+        "graphql_rejections": 0,
+        "graphql_rate_limited": 0,
+    },
     "people": {},  # person -> seeded data
     "prices": {},  # isin -> [[iso day, mid price], ...] (market data for BrokerChart / BrokerQuote)
     "devices": {},  # device_code -> {user_code, jkt, person, denied, last_poll, expires}
@@ -76,12 +82,17 @@ def _b64(data: bytes) -> str:
 
 
 def _thumbprint(jwk: dict) -> str:
-    canonical = json.dumps({"crv": jwk["crv"], "kty": jwk["kty"], "x": jwk["x"], "y": jwk["y"]}, separators=(",", ":"))
+    canonical = json.dumps(
+        {"crv": jwk["crv"], "kty": jwk["kty"], "x": jwk["x"], "y": jwk["y"]},
+        separators=(",", ":"),
+    )
     return _b64(hashlib.sha256(canonical.encode()).digest())
 
 
 def _oauth_error(status: int, error: str, headers: dict | None = None) -> web.Response:
-    return web.json_response({"error": error, "error_description": error}, status=status, headers=headers)
+    return web.json_response(
+        {"error": error, "error_description": error}, status=status, headers=headers
+    )
 
 
 def _verify_proof(request: web.Request, access_token: str | None = None) -> str:
@@ -90,17 +101,26 @@ def _verify_proof(request: web.Request, access_token: str | None = None) -> str:
     if not proof:
         raise ValueError("invalid_dpop_proof")
     header = jwt.get_unverified_header(proof)
-    if header.get("typ") != "dpop+jwt" or header.get("alg") != "ES256" or "jwk" not in header:
+    if (
+        header.get("typ") != "dpop+jwt"
+        or header.get("alg") != "ES256"
+        or "jwk" not in header
+    ):
         raise ValueError("invalid_dpop_proof")
     key = jwt.algorithms.ECAlgorithm.from_jwk(json.dumps(header["jwk"]))
     claims = jwt.decode(proof, key, algorithms=["ES256"])
     htu = f"{request.scheme}://{request.host}{request.path}"
     if claims.get("htm") != request.method or claims.get("htu") != htu:
         raise ValueError("invalid_dpop_proof")
-    if abs(time.time() - claims.get("iat", 0)) > 60 or claims.get("jti") in STATE["jtis"]:
+    if (
+        abs(time.time() - claims.get("iat", 0)) > 60
+        or claims.get("jti") in STATE["jtis"]
+    ):
         raise ValueError("invalid_dpop_proof")
     STATE["jtis"].add(claims["jti"])
-    if access_token is not None and claims.get("ath") != _b64(hashlib.sha256(access_token.encode()).digest()):
+    if access_token is not None and claims.get("ath") != _b64(
+        hashlib.sha256(access_token.encode()).digest()
+    ):
         raise ValueError("invalid_dpop_proof")
     jkt = _thumbprint(header["jwk"])
     request["dpop_nonce"] = claims.get("nonce")
@@ -134,7 +154,13 @@ def _issue(family_id: str) -> dict:
         family["used"].add(family["current"])
     family["current"] = refresh
     STATE["refresh"][refresh] = family_id
-    return {"access_token": access, "refresh_token": refresh, "expires_in": ttl, "token_type": "DPoP", "scope": "offline_access openid email"}
+    return {
+        "access_token": access,
+        "refresh_token": refresh,
+        "expires_in": ttl,
+        "token_type": "DPoP",
+        "scope": "offline_access openid email",
+    }
 
 
 async def device_code(request: web.Request) -> web.Response:
@@ -144,8 +170,19 @@ async def device_code(request: web.Request) -> web.Response:
         return _oauth_error(400, "invalid_dpop_proof")
     form = await request.post()
     _log(request, grant="device_code_start", jkt=jkt)
-    code, user_code = secrets.token_urlsafe(24), f"{secrets.token_hex(2).upper()}-{secrets.token_hex(2).upper()}"
-    STATE["devices"][code] = {"user_code": user_code, "jkt": jkt, "person": None, "denied": False, "last_poll": 0.0, "used": False, "client_id": form.get("client_id")}
+    code, user_code = (
+        secrets.token_urlsafe(24),
+        f"{secrets.token_hex(2).upper()}-{secrets.token_hex(2).upper()}",
+    )
+    STATE["devices"][code] = {
+        "user_code": user_code,
+        "jkt": jkt,
+        "person": None,
+        "denied": False,
+        "last_poll": 0.0,
+        "used": False,
+        "client_id": form.get("client_id"),
+    }
     base = f"{request.scheme}://{request.host}/activate"
     return web.json_response(
         {
@@ -180,12 +217,24 @@ async def token(request: web.Request) -> web.Response:
         if device["denied"]:
             return _oauth_error(403, "access_denied")
         if device["person"] is None:
-            too_fast = time.time() - device["last_poll"] < STATE["config"]["interval"] - 0.5
+            too_fast = (
+                time.time() - device["last_poll"] < STATE["config"]["interval"] - 0.5
+            )
             device["last_poll"] = time.time()
-            return _oauth_error(400, "slow_down" if too_fast else "authorization_pending")
+            return _oauth_error(
+                400, "slow_down" if too_fast else "authorization_pending"
+            )
         device["used"] = True
         family = uuid.uuid4().hex
-        STATE["families"][family] = {"person": device["person"], "jkt": jkt, "current": None, "used": set(), "revoked": False, "session": uuid.uuid4().hex, "refreshes": 0}
+        STATE["families"][family] = {
+            "person": device["person"],
+            "jkt": jkt,
+            "current": None,
+            "used": set(),
+            "revoked": False,
+            "session": uuid.uuid4().hex,
+            "refreshes": 0,
+        }
         return web.json_response(_issue(family))
 
     if grant == "refresh_token":
@@ -228,18 +277,34 @@ def _page(rows: list[dict], page_input: dict) -> dict:
     start = int(page_input.get("cursor") or 0)
     chunk = rows[start : start + size]
     nxt = start + size
-    return {"cursor": str(nxt) if nxt < len(rows) else None, "total": len(chunk), "transactions": chunk}
+    return {
+        "cursor": str(nxt) if nxt < len(rows) else None,
+        "total": len(chunk),
+        "transactions": chunk,
+    }
 
 
-def _answer(person: dict, person_id: str, operation: str, variables: dict) -> dict | None:
+def _answer(
+    person: dict, person_id: str, operation: str, variables: dict
+) -> dict | None:
     pid = variables.get("portfolioId")
     if pid is not None and pid not in person["portfolios"]:
         return None
     portfolio = person["portfolios"].get(pid) or {}
     if operation == "ResolveBrokerIds":
-        return {"account": {"id": person_id, "brokerPortfolios": [{"id": p} for p in person["portfolios"]]}}
+        return {
+            "account": {
+                "id": person_id,
+                "brokerPortfolios": [{"id": p} for p in person["portfolios"]],
+            }
+        }
     if operation == "Is2faOnLoginEnabled":
-        return {"is2faOnLoginEnabled": {"enabled": person.get("mfa", False), "hasApprovedSession": False}}
+        return {
+            "is2faOnLoginEnabled": {
+                "enabled": person.get("mfa", False),
+                "hasApprovedSession": False,
+            }
+        }
     if operation == "Start2faOnLogin":
         session = uuid.uuid4().hex
         STATE["mfa"][session] = person_id
@@ -249,32 +314,116 @@ def _answer(person: dict, person_id: str, operation: str, variables: dict) -> di
             return None
         return {"validate2faOnLogin": {"status": person.get("mfa_status", "PENDING")}}
     if operation == "BrokerOverview":
-        securities = sum(h["portfolioIsinPerformance"]["valuation"] for h in portfolio.get("holdings", []))
+        securities = sum(
+            h["portfolioIsinPerformance"]["valuation"]
+            for h in portfolio.get("holdings", [])
+        )
         crypto = portfolio.get("crypto", 0)
-        return {"account": {"brokerPortfolio": {"valuation": {"valuation": securities + crypto + portfolio.get("cash", 0), "securitiesValuation": securities, "cryptoValuation": crypto, "timestampUtc": {"time": "2026-09-25T21:00:00.000Z"}}}}}
+        return {
+            "account": {
+                "brokerPortfolio": {
+                    "valuation": {
+                        "valuation": securities + crypto + portfolio.get("cash", 0),
+                        "securitiesValuation": securities,
+                        "cryptoValuation": crypto,
+                        "timestampUtc": {"time": "2026-09-25T21:00:00.000Z"},
+                    }
+                }
+            }
+        }
     if operation == "BrokerQuote":
         prices = STATE["prices"].get(variables["isin"])
         if not prices:
             return None
         day, price = prices[-1]
-        return {"account": {"brokerPortfolio": {"security": {"isin": variables["isin"], "name": f"Fund {variables['isin']}", "quoteTick": {
-            "midPrice": price, "bidPrice": round(price - 0.05, 4), "askPrice": round(price + 0.05, 4), "currency": "EUR", "isOutdated": False, "timestampUtc": {"time": f"{day}T16:00:00.000Z"}}}}}}
+        return {
+            "account": {
+                "brokerPortfolio": {
+                    "security": {
+                        "isin": variables["isin"],
+                        "name": f"Fund {variables['isin']}",
+                        "quoteTick": {
+                            "midPrice": price,
+                            "bidPrice": round(price - 0.05, 4),
+                            "askPrice": round(price + 0.05, 4),
+                            "currency": "EUR",
+                            "isOutdated": False,
+                            "timestampUtc": {"time": f"{day}T16:00:00.000Z"},
+                        },
+                    }
+                }
+            }
+        }
     if operation == "BrokerHoldings":
-        return {"account": {"brokerPortfolio": {"inventory": {"items": portfolio.get("holdings", [])}}}}
+        return {
+            "account": {
+                "brokerPortfolio": {
+                    "inventory": {"items": portfolio.get("holdings", [])}
+                }
+            }
+        }
     if operation == "BrokerLimits":
         cash = portfolio.get("cash", 0)
-        return {"account": {"brokerPortfolio": {"payments": {"buyingPower": {"cashBalance": cash, "cashAvailableToInvest": cash}, "withdrawalPower": {"cashAvailableForWithdrawal": cash}}}}}
+        return {
+            "account": {
+                "brokerPortfolio": {
+                    "payments": {
+                        "buyingPower": {
+                            "cashBalance": cash,
+                            "cashAvailableToInvest": cash,
+                        },
+                        "withdrawalPower": {"cashAvailableForWithdrawal": cash},
+                    }
+                }
+            }
+        }
     if operation == "BrokerTransactions":
-        return {"account": {"brokerPortfolio": {"moreTransactions": _page(portfolio.get("transactions", []), variables["input"])}}}
+        return {
+            "account": {
+                "brokerPortfolio": {
+                    "moreTransactions": _page(
+                        portfolio.get("transactions", []), variables["input"]
+                    )
+                }
+            }
+        }
     if operation == "DiscoverOvernightAccounts":
-        return {"account": {"savingsAccounts": [{"__typename": "OvernightSavingsAccount", "id": sid, "state": s.get("state", "ACTIVE"), "personalizations": {"name": s.get("name", "Tagesgeld")}} for sid, s in person.get("savings", {}).items()]}}
+        return {
+            "account": {
+                "savingsAccounts": [
+                    {
+                        "__typename": "OvernightSavingsAccount",
+                        "id": sid,
+                        "state": s.get("state", "ACTIVE"),
+                        "personalizations": {"name": s.get("name", "Tagesgeld")},
+                    }
+                    for sid, s in person.get("savings", {}).items()
+                ]
+            }
+        }
     savings = person.get("savings", {}).get(variables.get("savingsAccountId"))
     if operation in ("OvernightSummary", "OvernightTransactions") and savings is None:
         return None
     if operation == "OvernightSummary":
-        return {"account": {"savingsAccount": {"id": variables["savingsAccountId"], "totalAmount": savings.get("total", 0)}}}
+        return {
+            "account": {
+                "savingsAccount": {
+                    "id": variables["savingsAccountId"],
+                    "totalAmount": savings.get("total", 0),
+                }
+            }
+        }
     if operation == "OvernightTransactions":
-        return {"account": {"savingsAccount": {"id": variables["savingsAccountId"], "moreTransactions": _page(savings.get("transactions", []), variables["input"])}}}
+        return {
+            "account": {
+                "savingsAccount": {
+                    "id": variables["savingsAccountId"],
+                    "moreTransactions": _page(
+                        savings.get("transactions", []), variables["input"]
+                    ),
+                }
+            }
+        }
     return None
 
 
@@ -287,7 +436,12 @@ async def graphql(request: web.Request) -> web.Response:
         return web.json_response({"errors": [{"message": "unauthorized"}]}, status=401)
     access = auth.removeprefix("DPoP ")
     try:
-        claims = jwt.decode(access, SIGNING_KEY.public_key(), algorithms=["RS256"], audience="https://de.scalable.capital/api-gateway")
+        claims = jwt.decode(
+            access,
+            SIGNING_KEY.public_key(),
+            algorithms=["RS256"],
+            audience="https://de.scalable.capital/api-gateway",
+        )
         jkt = _verify_proof(request, access_token=access)
     except Exception as error:
         _log(request, operation=operation, rejected=f"auth:{type(error).__name__}")
@@ -303,29 +457,63 @@ async def graphql(request: web.Request) -> web.Response:
         return web.json_response(
             {"errors": [{"message": "unauthorized"}]},
             status=401,
-            headers={"DPoP-Nonce": secrets.token_urlsafe(12), "WWW-Authenticate": 'DPoP error="use_dpop_nonce"'},
+            headers={
+                "DPoP-Nonce": secrets.token_urlsafe(12),
+                "WWW-Authenticate": 'DPoP error="use_dpop_nonce"',
+            },
         )
     if config["graphql_rate_limited"] > 0:
         config["graphql_rate_limited"] -= 1
         _log(request, operation=operation, rejected="rate_limited")
-        return web.json_response({"errors": [{"message": "too many requests"}]}, status=429, headers={"Retry-After": "120"})
+        return web.json_response(
+            {"errors": [{"message": "too many requests"}]},
+            status=429,
+            headers={"Retry-After": "120"},
+        )
     if config["graphql_rejections"] > 0:
         config["graphql_rejections"] -= 1
         _log(request, operation=operation, rejected="token")
         return web.json_response({"errors": [{"message": "unauthorized"}]}, status=401)
     _log(request, operation=operation, variables=body.get("variables"))
     if operation not in ALLOWED:
-        return web.json_response({"errors": [{"message": f"operation {operation} not allowed"}]}, status=400)
+        return web.json_response(
+            {"errors": [{"message": f"operation {operation} not allowed"}]}, status=400
+        )
     person_id = claims[NS + "person_id"]
     variables = body.get("variables") or {}
-    account_id = variables.get("accountId") or variables.get("id") or (variables.get("input") or {}).get("userId")
+    account_id = (
+        variables.get("accountId")
+        or variables.get("id")
+        or (variables.get("input") or {}).get("userId")
+    )
     if operation == "BrokerChart":  # market data: not tied to the account
         prices = STATE["prices"].get(variables["isin"], [])
-        points = [{"midPrice": price, "timestampUtc": {"time": f"{day}T16:00:00.000Z"}} for day, price in prices]
-        return web.json_response({"data": {"timeSeriesBySecurity": [{"isin": variables["isin"], "timeFrame": variables["timeFrames"][0], "currency": "EUR", "dataPoints": points}]}})
+        points = [
+            {"midPrice": price, "timestampUtc": {"time": f"{day}T16:00:00.000Z"}}
+            for day, price in prices
+        ]
+        return web.json_response(
+            {
+                "data": {
+                    "timeSeriesBySecurity": [
+                        {
+                            "isin": variables["isin"],
+                            "timeFrame": variables["timeFrames"][0],
+                            "currency": "EUR",
+                            "dataPoints": points,
+                        }
+                    ]
+                }
+            }
+        )
     if account_id != person_id:
         return web.json_response({"data": None, "errors": [{"message": "forbidden"}]})
-    data = _answer(STATE["people"].get(person_id, {"portfolios": {}}), person_id, operation, variables)
+    data = _answer(
+        STATE["people"].get(person_id, {"portfolios": {}}),
+        person_id,
+        operation,
+        variables,
+    )
     if data is None:
         return web.json_response({"data": None, "errors": [{"message": "not found"}]})
     return web.json_response({"data": data})
@@ -360,7 +548,9 @@ async def admin_deny(request: web.Request) -> web.Response:
 
 async def admin_mfa(request: web.Request) -> web.Response:
     body = await request.json()
-    STATE["people"].setdefault(body["person"], {"portfolios": {}})["mfa_status"] = body["status"]
+    STATE["people"].setdefault(body["person"], {"portfolios": {}})["mfa_status"] = body[
+        "status"
+    ]
     return web.json_response({"ok": True})
 
 
@@ -375,7 +565,13 @@ async def admin_revoke(request: web.Request) -> web.Response:
 async def admin_families(request: web.Request) -> web.Response:
     person = request.query["person"]
     return web.json_response(
-        {"families": [{"revoked": f["revoked"], "refreshes": f["refreshes"]} for f in STATE["families"].values() if f["person"] == person]}
+        {
+            "families": [
+                {"revoked": f["revoked"], "refreshes": f["refreshes"]}
+                for f in STATE["families"].values()
+                if f["person"] == person
+            ]
+        }
     )
 
 

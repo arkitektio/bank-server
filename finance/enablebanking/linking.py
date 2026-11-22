@@ -18,7 +18,7 @@ builds the client from the provider row.
 """
 
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from channels.db import database_sync_to_async
@@ -41,11 +41,17 @@ if TYPE_CHECKING:
 def pick_redirect(config: EnableBankingConfig, requested: str | None) -> str:
     """The requested redirect URL if it is registered, else the default; refuses anything else."""
     if not config.redirect_urls:
-        raise LinkError("This Enable Banking provider has no redirect URL.", code=models.BankErrorCode.NOT_CONFIGURED)
+        raise LinkError(
+            "This Enable Banking provider has no redirect URL.",
+            code=models.BankErrorCode.NOT_CONFIGURED,
+        )
     if requested is None:
         return config.redirect_urls[0]
     if requested not in config.redirect_urls:
-        raise LinkError(f"Redirect URL {requested!r} is not registered; use one of {config.redirect_urls}.", code=None)
+        raise LinkError(
+            f"Redirect URL {requested!r} is not registered; use one of {config.redirect_urls}.",
+            code=None,
+        )
     return requested
 
 
@@ -53,16 +59,30 @@ def _parse_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-async def start_link(provider: models.BankProvider, client: EnableBankingClient, organization: "Organization", creator: "User", aspsp_name: str, country: str, redirect_url: str | None) -> models.BankConnection:
+async def start_link(
+    provider: models.BankProvider,
+    client: EnableBankingClient,
+    organization: "Organization",
+    creator: "User",
+    aspsp_name: str,
+    country: str,
+    redirect_url: str | None,
+) -> models.BankConnection:
     """Start a consent; returns the PENDING connection (its ``raw`` holds the bank login URL)."""
     config = client.config
     redirect = pick_redirect(config, redirect_url)
     state = secrets.token_urlsafe(32)
-    valid_until = (datetime.now(timezone.utc) + timedelta(days=config.consent_days)).isoformat()
-    auth = await client.start_auth(aspsp_name=aspsp_name, country=country, state=state, redirect_url=redirect, valid_until=valid_until)
+    valid_until = (datetime.now(UTC) + timedelta(days=config.consent_days)).isoformat()
+    auth = await client.start_auth(
+        aspsp_name=aspsp_name,
+        country=country,
+        state=state,
+        redirect_url=redirect,
+        valid_until=valid_until,
+    )
     return await models.BankConnection.objects.acreate(
         organization=organization,
         creator=creator,
@@ -85,7 +105,9 @@ def _claim_pending(connection_id: int) -> tuple[models.BankConnection, bool]:
     """
     now = dj_timezone.now()
     with db_transaction.atomic():
-        connection = models.BankConnection.objects.select_for_update().get(id=connection_id)
+        connection = models.BankConnection.objects.select_for_update().get(
+            id=connection_id
+        )
         if connection.status != models.ConnectionStatus.PENDING:
             return connection, False
         if connection.pending_expires_at < now:
@@ -104,16 +126,22 @@ def _claim_pending(connection_id: int) -> tuple[models.BankConnection, bool]:
 def account_identity(account: dict) -> str:
     """Stable identity of an account across sessions."""
     iban = (account.get("account_id") or {}).get("iban")
-    return account.get("identification_hash") or (f"iban:{iban}" if iban else f"uid:{account['uid']}")
+    return account.get("identification_hash") or (
+        f"iban:{iban}" if iban else f"uid:{account['uid']}"
+    )
 
 
 def _activate(connection_id: int, session: dict) -> models.BankConnection:
     now = dj_timezone.now()
     with db_transaction.atomic():
-        connection = models.BankConnection.objects.select_for_update().get(id=connection_id)
+        connection = models.BankConnection.objects.select_for_update().get(
+            id=connection_id
+        )
         connection.status = models.ConnectionStatus.ACTIVE
         connection.session_id = session["session_id"]
-        connection.valid_until = _parse_datetime((session.get("access") or {}).get("valid_until"))
+        connection.valid_until = _parse_datetime(
+            (session.get("access") or {}).get("valid_until")
+        )
         connection.linked_at = now
         connection.token_lease_until = None
         connection.last_error = connection.last_error_code = None
@@ -133,7 +161,9 @@ def _activate(connection_id: int, session: dict) -> models.BankConnection:
                 product=account.get("product"),
                 raw=account,
             )
-        if not models.Category.objects.filter(organization_id=connection.organization_id).exists():
+        if not models.Category.objects.filter(
+            organization_id=connection.organization_id
+        ).exists():
             seed_base_categories(connection.organization_id)
     return connection
 
@@ -142,16 +172,25 @@ def _fail(connection_id: int, error: Exception) -> models.BankConnection:
     from bank_server.service import restore_connection  # it imports finance.models
     from finance.errors import code_for
 
-    models.BankConnection.objects.filter(id=connection_id).update(status=models.ConnectionStatus.FAILED, last_error=str(error)[:2000], last_error_code=code_for(error), token_lease_until=None)
+    models.BankConnection.objects.filter(id=connection_id).update(
+        status=models.ConnectionStatus.FAILED,
+        last_error=str(error)[:2000],
+        last_error_code=code_for(error),
+        token_lease_until=None,
+    )
     restore_connection(connection_id)
     return models.BankConnection.objects.get(id=connection_id)
 
 
 def _release(connection_id: int) -> None:
-    models.BankConnection.objects.filter(id=connection_id).update(token_lease_until=None)
+    models.BankConnection.objects.filter(id=connection_id).update(
+        token_lease_until=None
+    )
 
 
-async def complete_link(client: EnableBankingClient, connection: models.BankConnection, code: str) -> models.BankConnection:
+async def complete_link(
+    client: EnableBankingClient, connection: models.BankConnection, code: str
+) -> models.BankConnection:
     """Exchange the bank's redirect ``code`` for a session and store its accounts; returns the connection as it is afterwards.
 
     A settled login is returned as it is (nothing is exchanged twice). A code Enable Banking
@@ -163,19 +202,28 @@ async def complete_link(client: EnableBankingClient, connection: models.BankConn
     try:
         session = await client.create_session(code)
     except ProviderError as error:
-        if error.code in (models.BankErrorCode.BANK_UNAVAILABLE, models.BankErrorCode.RATE_LIMITED):  # the code may still be good
+        if error.code in (
+            models.BankErrorCode.BANK_UNAVAILABLE,
+            models.BankErrorCode.RATE_LIMITED,
+        ):  # the code may still be good
             await database_sync_to_async(_release)(connection.id)
             raise
-        failed: models.BankConnection = await database_sync_to_async(_fail)(connection.id, error)
+        failed: models.BankConnection = await database_sync_to_async(_fail)(
+            connection.id, error
+        )
         return failed
     except Exception:
         await database_sync_to_async(_release)(connection.id)
         raise
-    linked: models.BankConnection = await database_sync_to_async(_activate)(connection.id, session)
+    linked: models.BankConnection = await database_sync_to_async(_activate)(
+        connection.id, session
+    )
     return linked
 
 
-async def revoke(client: EnableBankingClient, connection: models.BankConnection) -> None:
+async def revoke(
+    client: EnableBankingClient, connection: models.BankConnection
+) -> None:
     """Withdraw the consent at the bank, best effort (it may already be gone there)."""
     if connection.session_id and connection.status == models.ConnectionStatus.ACTIVE:
         try:

@@ -2,7 +2,6 @@
 
 import datetime
 from decimal import Decimal
-from typing import List, Optional
 
 import kante
 import strawberry
@@ -11,19 +10,22 @@ from finance import enums, models
 from finance.types import OrgScoped
 
 
-@kante.django_type(models.SecurityListing, description="Which listing (a source's symbol) the organization prices an ISIN by. `pinned` ones were chosen by a user.")
+@kante.django_type(
+    models.SecurityListing,
+    description="Which listing (a source's symbol) the organization prices an ISIN by. `pinned` ones were chosen by a user.",
+)
 class SecurityListing(OrgScoped):
     id: strawberry.ID
     isin: str
     source: enums.PriceSource
     symbol: str
-    exchange: Optional[str]
-    name: Optional[str]
-    currency: Optional[str]
+    exchange: str | None
+    name: str | None
+    currency: str | None
     pinned: bool
-    resolved_at: Optional[datetime.datetime]
-    fetched_at: Optional[datetime.datetime]
-    last_error: Optional[str]
+    resolved_at: datetime.datetime | None
+    fetched_at: datetime.datetime | None
+    last_error: str | None
 
 
 @strawberry.type(description="A closing price on a trading day.")
@@ -32,13 +34,15 @@ class PricePoint:
     close: Decimal
 
 
-@strawberry.type(description="An ISIN's daily closes from one source (the first, in preference order, that has any in the window).")
+@strawberry.type(
+    description="An ISIN's daily closes from one source (the first, in preference order, that has any in the window)."
+)
 class PriceSeries:
     isin: str
-    source: Optional[enums.PriceSource]
-    symbol: Optional[str]
-    currency: Optional[str]
-    points: List[PricePoint]
+    source: enums.PriceSource | None
+    symbol: str | None
+    currency: str | None
+    points: list[PricePoint]
 
 
 @strawberry.type(description="The latest price of an ISIN, fetched now.")
@@ -46,12 +50,12 @@ class SecurityQuote:
     isin: str
     source: enums.PriceSource
     symbol: str
-    name: Optional[str]
+    name: str | None
     price: Decimal
-    bid: Optional[Decimal]
-    ask: Optional[Decimal]
+    bid: Decimal | None
+    ask: Decimal | None
     currency: str
-    time: Optional[datetime.datetime]
+    time: datetime.datetime | None
 
 
 @strawberry.type(description="How one depot position's price moved over a window.")
@@ -59,29 +63,37 @@ class PositionPerformance:
     isin: str
     name: str
     quantity: Decimal
-    source: Optional[enums.PriceSource]
-    currency: Optional[str]
-    first_date: Optional[datetime.date]
-    first_close: Optional[Decimal]
-    last_date: Optional[datetime.date]
-    last_close: Optional[Decimal]
-    change: Optional[Decimal] = strawberry.field(description="last − first close, per unit.")
-    change_ratio: Optional[float] = strawberry.field(description="change / first close.")
-    value_change: Optional[Decimal] = strawberry.field(description="quantity × change: what the position gained or lost in the window at today's quantity.")
+    source: enums.PriceSource | None
+    currency: str | None
+    first_date: datetime.date | None
+    first_close: Decimal | None
+    last_date: datetime.date | None
+    last_close: Decimal | None
+    change: Decimal | None = strawberry.field(
+        description="last − first close, per unit."
+    )
+    change_ratio: float | None = strawberry.field(description="change / first close.")
+    value_change: Decimal | None = strawberry.field(
+        description="quantity × change: what the position gained or lost in the window at today's quantity."
+    )
 
 
 @strawberry.type(description="What refreshing one ISIN from one source did.")
 class PriceRefresh:
     isin: str
     source: enums.PriceSource
-    symbol: Optional[str]
+    symbol: str | None
     points: int
-    error: Optional[str]
+    error: str | None
 
 
-@strawberry.input(description="Choose the listing an ISIN is priced by for one source (it is never re-resolved).")
+@strawberry.input(
+    description="Choose the listing an ISIN is priced by for one source (it is never re-resolved)."
+)
 class PinSecurityListingInput:
     isin: str
     source: enums.PriceSource
-    symbol: str = strawberry.field(description="The source's symbol: Yahoo VWCE.DE, Twelve Data VWCE (with `exchange` XETR), Scalable the ISIN.")
-    exchange: Optional[str] = None
+    symbol: str = strawberry.field(
+        description="The source's symbol: Yahoo VWCE.DE, Twelve Data VWCE (with `exchange` XETR), Scalable the ISIN."
+    )
+    exchange: str | None = None

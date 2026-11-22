@@ -2,10 +2,9 @@
 
 import boto3
 import pytest
+from arkitekt_datalayer import models as dl_models
 from botocore.config import Config
 from botocore.exceptions import ClientError
-
-from arkitekt_datalayer import models as dl_models
 
 from .conftest import REQUEST_UPLOAD
 
@@ -14,12 +13,17 @@ async def test_upload_round_trip(upload, datalayer, authenticated_context):
     store_id = await upload(b"Buchungstag;Betrag\n", name="export.csv")
 
     store = await dl_models.BigFileStore.objects.aget(id=store_id)
-    assert store.populated and store.organization_id == authenticated_context.request.organization.id
+    assert (
+        store.populated
+        and store.organization_id == authenticated_context.request.organization.id
+    )
     assert datalayer.read_object(store.bucket, store.key) == b"Buchungstag;Betrag\n"
 
 
 async def test_a_grant_writes_only_its_own_key(aexecute, datalayer, backend_stack):
-    grant = (await aexecute(REQUEST_UPLOAD, {"name": "a.xlsx", "size": 3})).data["requestBigfileUpload"]
+    grant = (await aexecute(REQUEST_UPLOAD, {"name": "a.xlsx", "size": 3})).data[
+        "requestBigfileUpload"
+    ]
     s3 = boto3.client(
         "s3",
         endpoint_url=f"http://localhost:{backend_stack.rustfs_port}",

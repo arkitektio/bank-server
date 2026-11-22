@@ -19,9 +19,16 @@ if TYPE_CHECKING:
 __all__ = ["PENDING_TTL", "LinkError", "start_link", "revoke_link"]
 
 
-async def start_link(organization: "Organization", creator: "User", provider: models.BankProvider, request: LinkRequest) -> models.BankConnection:
+async def start_link(
+    organization: "Organization",
+    creator: "User",
+    provider: models.BankProvider,
+    request: LinkRequest,
+) -> models.BankConnection:
     """Start a login at ``provider``; returns the PENDING connection."""
-    return await usable(provider, "This link").start_link(organization, creator, request)
+    return await usable(provider, "This link").start_link(
+        organization, creator, request
+    )
 
 
 async def revoke_link(connection: models.BankConnection) -> models.BankConnection:

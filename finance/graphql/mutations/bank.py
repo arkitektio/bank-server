@@ -4,7 +4,6 @@ These talk to a provider, so they are async: the HTTP calls never block the even
 """
 
 import logging
-from typing import Optional
 
 import strawberry
 from channels.db import database_sync_to_async
@@ -33,20 +32,39 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-@strawberry.input(description="Start a login through one of the organization's providers.")
+@strawberry.input(
+    description="Start a login through one of the organization's providers."
+)
 class StartLinkInput:
-    provider: strawberry.ID = strawberry.field(description="The provider to link through (see `bankProviders`).")
-    institution: Optional[str] = strawberry.field(default=None, description="For a kind with institutions: the bank's name exactly as `bankInstitutions` lists it.")
-    country: Optional[str] = strawberry.field(default=None, description="For a kind with institutions: the bank's ISO country code, e.g. AT.")
-    redirect_url: Optional[str] = strawberry.field(default=None, description="REDIRECT kinds: one of the provider's redirect URLs; the first by default.")
+    provider: strawberry.ID = strawberry.field(
+        description="The provider to link through (see `bankProviders`)."
+    )
+    institution: str | None = strawberry.field(
+        default=None,
+        description="For a kind with institutions: the bank's name exactly as `bankInstitutions` lists it.",
+    )
+    country: str | None = strawberry.field(
+        default=None,
+        description="For a kind with institutions: the bank's ISO country code, e.g. AT.",
+    )
+    redirect_url: str | None = strawberry.field(
+        default=None,
+        description="REDIRECT kinds: one of the provider's redirect URLs; the first by default.",
+    )
 
 
 @strawberry.input(description="Finish (REDIRECT) or advance (POLL) a started login.")
 class CompleteAuthInput:
     state: str
-    code: Optional[str] = strawberry.field(default=None, description="REDIRECT: the `code` query parameter of the redirect. POLL: omitted.")
-    error: Optional[str] = strawberry.field(default=None, description="REDIRECT: the provider's `error` / `error_description`, when it refused.")
-    error_description: Optional[str] = None
+    code: str | None = strawberry.field(
+        default=None,
+        description="REDIRECT: the `code` query parameter of the redirect. POLL: omitted.",
+    )
+    error: str | None = strawberry.field(
+        default=None,
+        description="REDIRECT: the provider's `error` / `error_description`, when it refused.",
+    )
+    error_description: str | None = None
 
 
 async def start_link(info: Info, input: StartLinkInput) -> types.AuthSession:
@@ -54,17 +72,41 @@ async def start_link(info: Info, input: StartLinkInput) -> types.AuthSession:
     request = info.context.request
     provider = await aget_or_404(models.BankProvider, info, input.provider)
     try:
-        connection = await linking.start_link(request.organization, request.user, provider, LinkRequest(institution=input.institution, country=input.country, redirect_url=input.redirect_url))
+        connection = await linking.start_link(
+            request.organization,
+            request.user,
+            provider,
+            LinkRequest(
+                institution=input.institution,
+                country=input.country,
+                redirect_url=input.redirect_url,
+            ),
+        )
     except Exception as error:
         raise _translate(error) from error
-    logger.info("Login %s started through %s by user %s.", connection.id, provider.kind, request.user.id)
+    logger.info(
+        "Login %s started through %s by user %s.",
+        connection.id,
+        provider.kind,
+        request.user.id,
+    )
     return types.AuthSession.of(auth_sessions.describe(connection))
 
 
-def _settled(call: str, connection: models.BankConnection, session: auth_sessions.AuthSession) -> None:
+def _settled(
+    call: str, connection: models.BankConnection, session: auth_sessions.AuthSession
+) -> None:
     """One line when a call leaves a login anywhere but PENDING (a poll step that changes nothing says nothing)."""
     if session.status != "PENDING":
-        logger.info("%s: login %s is %s%s.", call, connection.id, session.status, f" ({session.error_code}: {session.error_message})" if session.error_message else "")
+        logger.info(
+            "%s: login %s is %s%s.",
+            call,
+            connection.id,
+            session.status,
+            f" ({session.error_code}: {session.error_message})"
+            if session.error_message
+            else "",
+        )
 
 
 async def _own_login(info: Info, state: str) -> models.BankConnection:
@@ -72,7 +114,11 @@ async def _own_login(info: Info, state: str) -> models.BankConnection:
     try:
         return await auth_sessions.find(request.organization, request.user, state)
     except LinkError:
-        logger.info("%s: user %s has no login with the state it sent.", info.field_name, request.user.id)
+        logger.info(
+            "%s: user %s has no login with the state it sent.",
+            info.field_name,
+            request.user.id,
+        )
         raise
 
 
@@ -83,7 +129,9 @@ async def complete_auth(info: Info, input: CompleteAuthInput) -> types.AuthSessi
     """
     try:
         connection = await _own_login(info, input.state)
-        session = await auth_sessions.complete(connection, input.code, input.error, input.error_description)
+        session = await auth_sessions.complete(
+            connection, input.code, input.error, input.error_description
+        )
         _settled("completeAuth", connection, session)
         return types.AuthSession.of(session)
     except Exception as error:
@@ -112,7 +160,9 @@ async def cancel_auth(info: Info, state: str) -> types.AuthSession:
 async def auth_session(info: Info, state: str) -> types.AuthSession:
     """Where a login is. No side effect."""
     try:
-        return types.AuthSession.of(auth_sessions.describe(await _own_login(info, state)))
+        return types.AuthSession.of(
+            auth_sessions.describe(await _own_login(info, state))
+        )
     except Exception as error:
         raise _translate(error) from error
 
@@ -132,7 +182,15 @@ async def _sync(info: Info, account_id: int) -> types.SyncResult:
     except Exception as error:
         raise _translate(error) from error
     account = await models.BankAccount.objects.aget(id=account_id)
-    return types.SyncResult(account=account, created=result.created, updated=result.updated, pending_replaced=result.pending_replaced, balances=result.balances, categorized=result.categorized, holdings=result.holdings)  # type: ignore[arg-type]
+    return types.SyncResult(
+        account=account,  # type: ignore[arg-type]
+        created=result.created,
+        updated=result.updated,
+        pending_replaced=result.pending_replaced,
+        balances=result.balances,
+        categorized=result.categorized,
+        holdings=result.holdings,
+    )
 
 
 async def sync_account(info: Info, id: strawberry.ID) -> types.SyncResult:
@@ -144,5 +202,12 @@ async def sync_account(info: Info, id: strawberry.ID) -> types.SyncResult:
 async def sync_connection(info: Info, id: strawberry.ID) -> list[types.SyncResult]:
     """Pull every account of a connection now."""
     connection = await aget_or_404(models.BankConnection, info, id)
-    ids = await database_sync_to_async(lambda: list(models.BankAccount.objects.filter(syncers__connection=connection).distinct().order_by("id").values_list("id", flat=True)))()
+    ids = await database_sync_to_async(
+        lambda: list(
+            models.BankAccount.objects.filter(syncers__connection=connection)
+            .distinct()
+            .order_by("id")
+            .values_list("id", flat=True)
+        )
+    )()
     return [await _sync(info, account_id) for account_id in ids]

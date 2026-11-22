@@ -67,11 +67,15 @@ async def test_claim_has_exactly_one_winner(link, fakebank):
 
 
 async def test_second_sync_is_refused_while_first_holds_the_account(link, fakebank):
-    account_id = await _linked_account(link, fakebank, [tx(f"-{i}.00", "2026-09-01", f"S{i}") for i in range(1, 5)])
+    account_id = await _linked_account(
+        link, fakebank, [tx(f"-{i}.00", "2026-09-01", f"S{i}") for i in range(1, 5)]
+    )
     fakebank.hold()
 
     first, first_outcome = _in_thread(lambda: asyncio.run(sync_account(account_id)))
-    _wait_until(lambda: fakebank.held() == 1)  # the first sync holds the lease, parked mid-fetch
+    _wait_until(
+        lambda: fakebank.held() == 1
+    )  # the first sync holds the lease, parked mid-fetch
 
     second, second_outcome = _in_thread(lambda: asyncio.run(sync_account(account_id)))
     second.join()
@@ -81,7 +85,9 @@ async def test_second_sync_is_refused_while_first_holds_the_account(link, fakeba
     assert isinstance(second_outcome.get("error"), AlreadySyncing)
     assert first_outcome["value"].created == 4
     assert await models.Transaction.objects.filter(account_id=account_id).acount() == 4
-    assert (await models.AccountSyncer.objects.aget(account_id=account_id)).sync_lease_until is None
+    assert (
+        await models.AccountSyncer.objects.aget(account_id=account_id)
+    ).sync_lease_until is None
 
 
 async def test_expired_lease_is_taken_over(link, fakebank):
@@ -91,5 +97,7 @@ async def test_expired_lease_is_taken_over(link, fakebank):
     from django.utils import timezone
 
     account_id = await _linked_account(link, fakebank, [])
-    await models.AccountSyncer.objects.filter(account_id=account_id).aupdate(sync_lease_until=timezone.now() - timedelta(seconds=1))
+    await models.AccountSyncer.objects.filter(account_id=account_id).aupdate(
+        sync_lease_until=timezone.now() - timedelta(seconds=1)
+    )
     await sync_account(account_id)

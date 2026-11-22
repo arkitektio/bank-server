@@ -31,7 +31,7 @@ import hashlib
 import logging
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from channels.db import database_sync_to_async
@@ -41,13 +41,13 @@ from django.db.models import Max, Q
 from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
 
-from finance import models
 from embeddings.models import EMBEDDING_FIELDS
+from finance import models
 from finance.errors import SyncBudgetExhausted
-from finance.semantic import auto_assign, embed_rows
 from finance.providers.base import DATA_CAPABILITIES, PsuHeaders
 from finance.providers.errors import ConsentGone, NotConfigured
 from finance.providers.registry import usable
+from finance.semantic import auto_assign, embed_rows
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,9 @@ def normalize(tx: dict) -> dict:
     amount = Decimal(str(tx["transaction_amount"]["amount"]))
     debit = tx.get("credit_debit_indicator") == "DBIT"
     party = (tx.get("creditor") if debit else tx.get("debtor")) or {}
-    party_account = (tx.get("creditor_account") if debit else tx.get("debtor_account")) or {}
+    party_account = (
+        tx.get("creditor_account") if debit else tx.get("debtor_account")
+    ) or {}
     status = tx.get("status") or "BOOK"
     return {
         "booking_date": _parse_date(tx.get("booking_date")),
@@ -109,7 +111,9 @@ def normalize(tx: dict) -> dict:
         "transaction_date": _parse_date(tx.get("transaction_date")),
         "amount": -abs(amount) if debit else abs(amount),
         "currency": tx["transaction_amount"]["currency"],
-        "status": status if status in models.TransactionStatus.values else models.TransactionStatus.OTHER,
+        "status": status
+        if status in models.TransactionStatus.values
+        else models.TransactionStatus.OTHER,
         "counterparty": party.get("name") or None,
         "counterparty_iban": party_account.get("iban") or None,
         "remittance": " ".join(tx.get("remittance_information") or []) or None,
@@ -129,7 +133,15 @@ def fingerprint_all(rows: list[dict]) -> list[str]:
             day = row["booking_date"] or row["value_date"] or row["transaction_date"]
             content = "|".join(
                 str(part or "")
-                for part in (row["status"], day, row["amount"], row["currency"], row["counterparty"], row["counterparty_iban"], row["remittance"])
+                for part in (
+                    row["status"],
+                    day,
+                    row["amount"],
+                    row["currency"],
+                    row["counterparty"],
+                    row["counterparty_iban"],
+                    row["remittance"],
+                )
             )
             base = "h:" + hashlib.sha256(content.encode()).hexdigest()[:40]
         n = seen[base]
@@ -159,7 +171,9 @@ def fetch_since(syncer: models.AccountSyncer, overlap_days: int) -> date | None:
     Only the syncer's own rows count: imported history on the same account never moves the
     window, so the first sync after an import still fetches everything the provider has.
     """
-    newest = syncer.transactions.filter(status=models.TransactionStatus.BOOKED).aggregate(newest=Max("booking_date"))["newest"]
+    newest = syncer.transactions.filter(
+        status=models.TransactionStatus.BOOKED
+    ).aggregate(newest=Max("booking_date"))["newest"]
     return newest - timedelta(days=overlap_days) if newest else None
 
 
@@ -171,8 +185,8 @@ def daily_limit(syncer: models.AccountSyncer) -> int | None:
 
 
 def _tomorrow(now: datetime) -> datetime:
-    today = now.astimezone(timezone.utc).date()
-    return datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    today = now.astimezone(UTC).date()
+    return datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=UTC)
 
 
 @dataclass
@@ -183,13 +197,19 @@ class SyncBudget:
     next_allowed_at: datetime | None
 
 
-def sync_budget(syncer: models.AccountSyncer, now: datetime | None = None) -> SyncBudget:
+def sync_budget(
+    syncer: models.AccountSyncer, now: datetime | None = None
+) -> SyncBudget:
     """Computed on read from the stored counter, the provider's limit and any rate-limit answer."""
     now = now or dj_timezone.now()
     limit = daily_limit(syncer)
-    used = syncer.syncs_today if syncer.sync_day == now.astimezone(timezone.utc).date() else 0
+    used = syncer.syncs_today if syncer.sync_day == now.astimezone(UTC).date() else 0
     remaining = None if limit is None else max(0, limit - used)
-    allowed_at = syncer.rate_limited_until if syncer.rate_limited_until and syncer.rate_limited_until > now else None
+    allowed_at = (
+        syncer.rate_limited_until
+        if syncer.rate_limited_until and syncer.rate_limited_until > now
+        else None
+    )
     if remaining == 0:
         allowed_at = max(allowed_at or now, _tomorrow(now))
     return SyncBudget(remaining, allowed_at)
@@ -202,7 +222,7 @@ def spend(syncer_id: int) -> None:
     requests racing for the last sync of the day cannot both get it.
     """
     now = dj_timezone.now()
-    today = now.astimezone(timezone.utc).date()
+    today = now.astimezone(UTC).date()
     with db_transaction.atomic():
         syncer = models.AccountSyncer.objects.select_for_update().get(id=syncer_id)
         budget = sync_budget(syncer, now)
@@ -215,10 +235,14 @@ def spend(syncer_id: int) -> None:
 
 def mark_synced(syncer: models.AccountSyncer, now: datetime) -> None:
     """Record a successful sync on the syncer (inside the persisting transaction)."""
-    models.AccountSyncer.objects.filter(id=syncer.id).update(last_synced_at=now, last_error=None, last_error_code=None)
+    models.AccountSyncer.objects.filter(id=syncer.id).update(
+        last_synced_at=now, last_error=None, last_error_code=None
+    )
 
 
-def take_over_imported(account: models.BankAccount, new: list[tuple[str, dict]]) -> dict[str, models.Transaction]:
+def take_over_imported(
+    account: models.BankAccount, new: list[tuple[str, dict]]
+) -> dict[str, models.Transaction]:
     """The account's IMPORT rows that new booked synced rows describe, by the synced row's fingerprint.
 
     The caller writes the synced bank fields into those rows (keeping their category, note,
@@ -227,10 +251,18 @@ def take_over_imported(account: models.BankAccount, new: list[tuple[str, dict]])
     """
     from finance.matching import pair, pool_for
 
-    booked = [(fp, row) for fp, row in new if row["status"] == models.TransactionStatus.BOOKED]
+    booked = [
+        (fp, row) for fp, row in new if row["status"] == models.TransactionStatus.BOOKED
+    ]
     if not booked:
         return {}
-    pool = list(pool_for(account, models.TransactionOrigin.IMPORT, [booking_day(row) for _, row in booked]))
+    pool = list(
+        pool_for(
+            account,
+            models.TransactionOrigin.IMPORT,
+            [booking_day(row) for _, row in booked],
+        )
+    )
     if not pool:
         return {}
     pairs = pair([row for _, row in booked], pool)
@@ -252,15 +284,26 @@ def categorize_rows(organization_id: int, touched_ids: list[int]) -> int:
     from finance.rules import apply_rules
 
     rows = models.Transaction.objects.filter(id__in=touched_ids)
-    match(organization_id, touched_ids)  # merchants first: a merchant's category needs its merchant
-    refresh_context(organization_id, touched_ids)  # …and the merchant/place words join the embedding before suggestions read it
+    match(
+        organization_id, touched_ids
+    )  # merchants first: a merchant's category needs its merchant
+    refresh_context(
+        organization_id, touched_ids
+    )  # …and the merchant/place words join the embedding before suggestions read it
     categorized = apply_rules(organization_id, rows)
-    categorized += categorize_by_merchant(organization_id, touched_ids)  # after rules, before suggestions
+    categorized += categorize_by_merchant(
+        organization_id, touched_ids
+    )  # after rules, before suggestions
     categorized += auto_assign(organization_id, touched_ids)
     return categorized
 
 
-def persist(syncer_id: int, raw_transactions: list[dict] | None, raw_balances: list[dict], since: date | None = None) -> SyncResult:
+def persist(
+    syncer_id: int,
+    raw_transactions: list[dict] | None,
+    raw_balances: list[dict],
+    since: date | None = None,
+) -> SyncResult:
     """Write one Enable Banking fetch (of everything from ``since`` on) in a single transaction.
 
     ``raw_transactions`` is None when transactions were not fetched (the provider has them
@@ -277,42 +320,76 @@ def persist(syncer_id: int, raw_transactions: list[dict] | None, raw_balances: l
     now = dj_timezone.now()
 
     with db_transaction.atomic():
-        account = models.BankAccount.objects.select_for_update().get(id=syncer.account_id)
+        account = models.BankAccount.objects.select_for_update().get(
+            id=syncer.account_id
+        )
 
         # Only the pending rows the fetch covered: an older one was not re-sent, and dropping it
         # would lose it until it books.
-        stale_pending = syncer.transactions.filter(status=models.TransactionStatus.PENDING)
+        stale_pending = syncer.transactions.filter(
+            status=models.TransactionStatus.PENDING
+        )
         if since is not None:
-            stale_pending = stale_pending.annotate(day=Coalesce("transaction_date", "value_date", "booking_date")).filter(Q(day__gte=since) | Q(day__isnull=True))
+            stale_pending = stale_pending.annotate(
+                day=Coalesce("transaction_date", "value_date", "booking_date")
+            ).filter(Q(day__gte=since) | Q(day__isnull=True))
         if raw_transactions is not None:
             result.pending_replaced = stale_pending.delete()[0]
         pending_rows = [
-            models.Transaction(account=account, syncer=syncer, fingerprint=f"pdng:{fp}", **row) for fp, row in zip(fingerprint_all(pending), pending)
+            models.Transaction(
+                account=account, syncer=syncer, fingerprint=f"pdng:{fp}", **row
+            )
+            for fp, row in zip(fingerprint_all(pending), pending)
         ]
         embed_rows(pending_rows)
         # No pre_save sees a bulk write: the rows are described before they are written.
         models.Transaction.objects.bulk_create(service.stamp(pending_rows))
 
         fingerprints = fingerprint_all(booked)
-        existing = {tx.fingerprint: tx for tx in account.transactions.filter(fingerprint__in=fingerprints)}
+        existing = {
+            tx.fingerprint: tx
+            for tx in account.transactions.filter(fingerprint__in=fingerprints)
+        }
         to_create, to_update = [], []
         new = [(fp, row) for fp, row in zip(fingerprints, booked) if fp not in existing]
         imported = take_over_imported(account, new)
         for fp, row in zip(fingerprints, booked):
             tx = existing.get(fp) or imported.get(fp)
             if tx is None:
-                to_create.append(models.Transaction(account=account, syncer=syncer, fingerprint=fp, **row))
+                to_create.append(
+                    models.Transaction(
+                        account=account, syncer=syncer, fingerprint=fp, **row
+                    )
+                )
                 continue
-            if fp in imported or tx.syncer_id != syncer.id or any(getattr(tx, name) != row[name] for name in BANK_FIELDS):
+            if (
+                fp in imported
+                or tx.syncer_id != syncer.id
+                or any(getattr(tx, name) != row[name] for name in BANK_FIELDS)
+            ):
                 for name in BANK_FIELDS:
                     setattr(tx, name, row[name])
-                tx.fingerprint, tx.syncer, tx.origin = fp, syncer, models.TransactionOrigin.SYNC
+                tx.fingerprint, tx.syncer, tx.origin = (
+                    fp,
+                    syncer,
+                    models.TransactionOrigin.SYNC,
+                )
                 tx.updated_at = now
                 to_update.append(tx)
         embed_rows(to_create + to_update)
         models.Transaction.objects.bulk_create(service.stamp(to_create))
         models.Transaction.objects.bulk_update(
-            service.stamp(to_update), BANK_FIELDS + ["fingerprint", "syncer", "origin", "updated_at", "stored_descriptors", *EMBEDDING_FIELDS], batch_size=500
+            service.stamp(to_update),
+            BANK_FIELDS
+            + [
+                "fingerprint",
+                "syncer",
+                "origin",
+                "updated_at",
+                "stored_descriptors",
+                *EMBEDDING_FIELDS,
+            ],
+            batch_size=500,
         )
         result.created, result.updated = len(to_create), len(to_update)
 
@@ -324,7 +401,10 @@ def persist(syncer_id: int, raw_transactions: list[dict] | None, raw_balances: l
                 account=account,
                 date=_parse_date(balance.get("reference_date")) or now.date(),
                 balance_type=balance.get("balance_type") or "OTHR",
-                defaults={"amount": Decimal(str(amount["amount"])), "currency": amount.get("currency") or account.currency},
+                defaults={
+                    "amount": Decimal(str(amount["amount"])),
+                    "currency": amount.get("currency") or account.currency,
+                },
             )
             result.balances += 1
 
@@ -351,16 +431,24 @@ def record_failure(syncer_id: int, error: Exception) -> None:
         syncer = models.AccountSyncer.objects.select_for_update().get(id=syncer_id)
         syncer.last_error, syncer.last_error_code = message, code
         fields = ["last_error", "last_error_code"]
-        if code == models.BankErrorCode.RATE_LIMITED and not isinstance(error, SyncBudgetExhausted):
+        if code == models.BankErrorCode.RATE_LIMITED and not isinstance(
+            error, SyncBudgetExhausted
+        ):
             retry_after = getattr(error, "retry_after", None)
             now = dj_timezone.now()
-            syncer.rate_limited_until = now + timedelta(seconds=retry_after) if retry_after else _tomorrow(now)
+            syncer.rate_limited_until = (
+                now + timedelta(seconds=retry_after) if retry_after else _tomorrow(now)
+            )
             fields.append("rate_limited_until")
         syncer.save(update_fields=fields)
         if code == models.BankErrorCode.CONSENT_EXPIRED and syncer.connection_id:
             # Only an ACTIVE consent can expire; a revoked one stays revoked.
-            expired = models.BankConnection.objects.filter(id=syncer.connection_id, status=models.ConnectionStatus.ACTIVE).update(
-                status=models.ConnectionStatus.EXPIRED, last_error=message, last_error_code=code
+            expired = models.BankConnection.objects.filter(
+                id=syncer.connection_id, status=models.ConnectionStatus.ACTIVE
+            ).update(
+                status=models.ConnectionStatus.EXPIRED,
+                last_error=message,
+                last_error_code=code,
             )
             if expired:
                 restore_connection(syncer.connection_id)
@@ -373,15 +461,21 @@ def detect_recurring(account_id: int) -> None:
     try:
         detect_for_account(models.BankAccount.objects.get(id=account_id))
     except Exception:
-        logger.warning("Recurring detection for account %s failed.", account_id, exc_info=True)
+        logger.warning(
+            "Recurring detection for account %s failed.", account_id, exc_info=True
+        )
 
 
 def _load(syncer_id: int) -> tuple[models.AccountSyncer, date | None]:
-    syncer = models.AccountSyncer.objects.select_related("connection__bank_provider", "account").get(id=syncer_id)
+    syncer = models.AccountSyncer.objects.select_related(
+        "connection__bank_provider", "account"
+    ).get(id=syncer_id)
     return syncer, fetch_since(syncer, sync_settings()["overlap_days"])
 
 
-async def sync_syncer(syncer_id: int, psu_headers: PsuHeaders | None = None) -> SyncResult:
+async def sync_syncer(
+    syncer_id: int, psu_headers: PsuHeaders | None = None
+) -> SyncResult:
     """Fetch one syncer from its provider and store it, inside this request.
 
     Raises :class:`AlreadySyncing` if another request holds the syncer and
@@ -389,19 +483,27 @@ async def sync_syncer(syncer_id: int, psu_headers: PsuHeaders | None = None) -> 
     day's budget is spent or the provider asked us to wait. ``psu_headers`` (the user's IP and
     user agent) tell a PSD2 bank that the user is present.
     """
-    if not await database_sync_to_async(claim)(syncer_id, sync_settings()["lease_seconds"]):
+    if not await database_sync_to_async(claim)(
+        syncer_id, sync_settings()["lease_seconds"]
+    ):
         raise AlreadySyncing(f"Syncer {syncer_id} is already being synced.")
     try:
         syncer, since = await database_sync_to_async(_load)(syncer_id)
         connection = syncer.connection
         if connection is None or connection.status != models.ConnectionStatus.ACTIVE:
             status = connection.status if connection else "missing"
-            raise ConnectionInactive(f"The account's bank connection is {status.lower()}; link the bank again to sync it.")
+            raise ConnectionInactive(
+                f"The account's bank connection is {status.lower()}; link the bank again to sync it."
+            )
         if connection.valid_until and connection.valid_until <= dj_timezone.now():
-            raise ConsentGone(f"The consent ran out at {connection.valid_until.isoformat()}.")
+            raise ConsentGone(
+                f"The consent ran out at {connection.valid_until.isoformat()}."
+            )
         backend = usable(connection.bank_provider, "This account's connection")
         if not any(backend.has(capability) for capability in DATA_CAPABILITIES):
-            raise NotConfigured(f"The provider {backend.provider.name!r} has transactions, balances and holdings switched off: there is nothing to sync.")
+            raise NotConfigured(
+                f"The provider {backend.provider.name!r} has transactions, balances and holdings switched off: there is nothing to sync."
+            )
         await database_sync_to_async(spend)(syncer_id)
         return await backend.sync(syncer, since, psu_headers)
     except (ConnectionInactive, SyncBudgetExhausted, NotConfigured):
@@ -415,16 +517,28 @@ async def sync_syncer(syncer_id: int, psu_headers: PsuHeaders | None = None) -> 
 
 def _syncers_to_run(account_id: int) -> list[int]:
     """The account's syncers with an ACTIVE connection; else its newest syncer (whose sync then explains why not)."""
-    syncers = list(models.AccountSyncer.objects.filter(account_id=account_id).select_related("connection").order_by("-id"))
-    live = [s.id for s in syncers if s.connection and s.connection.status == models.ConnectionStatus.ACTIVE]
+    syncers = list(
+        models.AccountSyncer.objects.filter(account_id=account_id)
+        .select_related("connection")
+        .order_by("-id")
+    )
+    live = [
+        s.id
+        for s in syncers
+        if s.connection and s.connection.status == models.ConnectionStatus.ACTIVE
+    ]
     if live:
         return sorted(live)
     if syncers:
         return [syncers[0].id]
-    raise ConnectionInactive("The account has no bank connection (it is fed by imports only); link the bank to sync it.")
+    raise ConnectionInactive(
+        "The account has no bank connection (it is fed by imports only); link the bank to sync it."
+    )
 
 
-async def sync_account(account_id: int, psu_headers: PsuHeaders | None = None) -> SyncResult:
+async def sync_account(
+    account_id: int, psu_headers: PsuHeaders | None = None
+) -> SyncResult:
     """Sync every live syncer of the account (see :func:`sync_syncer`); the first failure raises.
 
     An account whose syncers are all inactive fails with :class:`ConnectionInactive` — as does one
@@ -433,7 +547,14 @@ async def sync_account(account_id: int, psu_headers: PsuHeaders | None = None) -
     total = SyncResult(account_id=account_id)
     for syncer_id in await database_sync_to_async(_syncers_to_run)(account_id):
         result = await sync_syncer(syncer_id, psu_headers=psu_headers)
-        for name in ("created", "updated", "pending_replaced", "balances", "categorized", "holdings"):
+        for name in (
+            "created",
+            "updated",
+            "pending_replaced",
+            "balances",
+            "categorized",
+            "holdings",
+        ):
             setattr(total, name, getattr(total, name) + getattr(result, name))
     await database_sync_to_async(after_sync)(total)
     return total
@@ -444,7 +565,11 @@ def after_sync(result: SyncResult) -> None:
     from finance.channels import broadcast_sync
 
     detect_recurring(result.account_id)
-    organization_id = models.BankAccount.objects.filter(id=result.account_id).values_list("organization_id", flat=True).get()
+    organization_id = (
+        models.BankAccount.objects.filter(id=result.account_id)
+        .values_list("organization_id", flat=True)
+        .get()
+    )
     broadcast_sync(organization_id, result)
     _signal_sync(result)
 
@@ -455,11 +580,17 @@ def _signal_sync(result: SyncResult) -> None:
     from bank_server.contract import NEW_TRANSACTIONS, UPDATED_TRANSACTIONS
     from bank_server.service import bank_account, bank_account_signal
 
-    account = models.BankAccount.objects.select_related("organization").get(id=result.account_id)
+    account = models.BankAccount.objects.select_related("organization").get(
+        id=result.account_id
+    )
     bank_account_signal.emit(
         account.pk,
         organization=account.organization.identifier,
         kind="UPDATED",
         # The account's own descriptors, plus what only this event knows.
-        descriptors={**bank_account.describe(account), NEW_TRANSACTIONS: result.created, UPDATED_TRANSACTIONS: result.updated},
+        descriptors={
+            **bank_account.describe(account),
+            NEW_TRANSACTIONS: result.created,
+            UPDATED_TRANSACTIONS: result.updated,
+        },
     )

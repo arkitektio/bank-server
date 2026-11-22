@@ -39,9 +39,15 @@ def get_many(model: type[M], info: Info, ids: list | None) -> list[M]:
 
 def psu_headers(info: Info) -> dict[str, str]:
     """The user's IP and user agent, so the bank treats a sync as user-present (no PSD2 cap)."""
-    headers = {k.lower(): v for k, v in (getattr(info.context, "headers", None) or {}).items()}
+    headers = {
+        k.lower(): v for k, v in (getattr(info.context, "headers", None) or {}).items()
+    }
     out = {}
-    ip = (headers.get("x-forwarded-for") or headers.get("x-real-ip") or "").split(",")[0].strip()
+    ip = (
+        (headers.get("x-forwarded-for") or headers.get("x-real-ip") or "")
+        .split(",")[0]
+        .strip()
+    )
     if ip:
         out["Psu-Ip-Address"] = ip
     if headers.get("user-agent"):

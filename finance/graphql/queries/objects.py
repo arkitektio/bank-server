@@ -1,7 +1,6 @@
 """Single-object and lookup queries. Lists are plain paginated fields in the schema."""
 
 import datetime
-from typing import Optional
 
 import strawberry
 import strawberry_django
@@ -9,10 +8,10 @@ from kante.types import Info
 
 from finance import filters as filters_module
 from finance import models, types
-from finance.scoping import for_org
-from finance.providers.registry import usable
 from finance.graphql.errors import translate
 from finance.graphql.utils import aget_or_404, get_or_404
+from finance.providers.registry import usable
+from finance.scoping import for_org
 
 __all__ = [
     "bank_connection",
@@ -76,17 +75,30 @@ def provider_kinds(info: Info) -> list[types.ProviderKind]:
     return [types.provider_kind(kind) for kind in models.Provider.values]
 
 
-async def bank_institutions(info: Info, provider: strawberry.ID, country: str) -> list[types.Institution]:
+async def bank_institutions(
+    info: Info, provider: strawberry.ID, country: str
+) -> list[types.Institution]:
     """The banks a provider can link in a country (ISO code, e.g. ``AT``); empty for a kind without institutions."""
     row = await aget_or_404(models.BankProvider, info, provider)
     try:
         institutions = await usable(row, "This lookup").institutions(country.upper())
     except Exception as error:
         raise translate(error) from error
-    return [types.Institution(name=i.name, country=i.country, logo=i.logo, bic=i.bic, maximum_consent_days=i.maximum_consent_days) for i in institutions]
+    return [
+        types.Institution(
+            name=i.name,
+            country=i.country,
+            logo=i.logo,
+            bic=i.bic,
+            maximum_consent_days=i.maximum_consent_days,
+        )
+        for i in institutions
+    ]
 
 
-def holdings(info: Info, account: strawberry.ID, date: Optional[datetime.date] = None) -> list[types.HoldingSnapshot]:
+def holdings(
+    info: Info, account: strawberry.ID, date: datetime.date | None = None
+) -> list[types.HoldingSnapshot]:
     """A depot's positions on a day (its latest synced day by default), largest first."""
     depot = get_or_404(models.BankAccount, info, account)
     rows = depot.holdings.all()
@@ -94,7 +106,9 @@ def holdings(info: Info, account: strawberry.ID, date: Optional[datetime.date] =
     return list(rows.filter(date=day).order_by("-valuation")) if day else []  # type: ignore[return-value]
 
 
-def transactions_count(info: Info, filters: Optional[filters_module.TransactionFilter] = None) -> int:
+def transactions_count(
+    info: Info, filters: filters_module.TransactionFilter | None = None
+) -> int:
     """How many transactions match (the same filters as `transactions`), e.g. for page numbers or an "uncategorized" badge."""
     rows = for_org(models.Transaction, info)
     if filters is not None:
@@ -102,7 +116,9 @@ def transactions_count(info: Info, filters: Optional[filters_module.TransactionF
     return rows.count()
 
 
-def suggest_categories(info: Info, transaction: strawberry.ID, limit: int = 3) -> list[types.CategorySuggestion]:
+def suggest_categories(
+    info: Info, transaction: strawberry.ID, limit: int = 3
+) -> list[types.CategorySuggestion]:
     """The categories a transaction most likely belongs to (the same as `Transaction.suggestedCategories`)."""
     tx = get_or_404(models.Transaction, info, transaction)
     return types.category_suggestions(tx, limit)

@@ -1,14 +1,19 @@
 """Realtime sync events (per organization) and login progress."""
 
+from collections.abc import AsyncGenerator
 from contextlib import aclosing
-from typing import AsyncGenerator, Optional
 
 import strawberry
 from django.utils import timezone
 from kante.types import Info
 
 from finance import auth_sessions, types
-from finance.channels import account_sync_channel, auth_group, auth_session_channel, org_group
+from finance.channels import (
+    account_sync_channel,
+    auth_group,
+    auth_session_channel,
+    org_group,
+)
 from finance.graphql.errors import translate
 
 __all__ = ["account_syncs", "auth_session"]
@@ -17,20 +22,34 @@ __all__ = ["account_syncs", "auth_session"]
 AUTH_RECHECK_SECONDS = 10.0
 
 
-async def account_syncs(self, info: Info, account: Optional[strawberry.ID] = None) -> AsyncGenerator[types.AccountSyncEvent, None]:
+async def account_syncs(
+    self, info: Info, account: strawberry.ID | None = None
+) -> AsyncGenerator[types.AccountSyncEvent, None]:
     """Stream an event whenever one of this organization's accounts finished syncing (only `account`, when given)."""
     group = org_group(info.context.request.organization.id)
     async for signal in account_sync_channel.listen(info.context, [group]):
         if account is not None and str(signal.account_id) != str(account):
             continue
-        yield types.AccountSyncEvent(account_id=strawberry.ID(str(signal.account_id)), created=signal.created, updated=signal.updated, pending_replaced=signal.pending_replaced)
+        yield types.AccountSyncEvent(
+            account_id=strawberry.ID(str(signal.account_id)),
+            created=signal.created,
+            updated=signal.updated,
+            pending_replaced=signal.pending_replaced,
+        )
 
 
 def _key(session: auth_sessions.AuthSession) -> tuple[object, ...]:
-    return (session.status, session.step, session.error_code, session.result.id if session.result else None)
+    return (
+        session.status,
+        session.step,
+        session.error_code,
+        session.result.id if session.result else None,
+    )
 
 
-async def auth_session(self, info: Info, state: str) -> AsyncGenerator[types.AuthSession, None]:
+async def auth_session(
+    self, info: Info, state: str
+) -> AsyncGenerator[types.AuthSession, None]:
     """The login as it is now, then again whenever it changes, until it is no longer PENDING. Only its starter may watch it."""
     request = info.context.request
     try:
@@ -43,7 +62,13 @@ async def auth_session(self, info: Info, state: str) -> AsyncGenerator[types.Aut
     while session.status == "PENDING":
         # Until something is announced, or at the latest until the login's time runs out (nothing announces that).
         left = (connection.pending_expires_at - timezone.now()).total_seconds()
-        async with aclosing(auth_session_channel.listen(info.context, [auth_group(state)], timeout=min(max(left, 0.0) + 0.5, AUTH_RECHECK_SECONDS))) as signals:
+        async with aclosing(
+            auth_session_channel.listen(
+                info.context,
+                [auth_group(state)],
+                timeout=min(max(left, 0.0) + 0.5, AUTH_RECHECK_SECONDS),
+            )
+        ) as signals:
             async for _ in signals:
                 break
         await connection.arefresh_from_db()

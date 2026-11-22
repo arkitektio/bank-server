@@ -12,7 +12,10 @@ SDL = str(schema)
 
 
 def test_money_is_never_int_or_float():
-    money = re.compile(r"^\s+(amount\w*|total|income|expense|net|budgeted|spent|remaining)\s*:\s*(Int|Float)", re.MULTILINE | re.IGNORECASE)
+    money = re.compile(
+        r"^\s+(amount\w*|total|income|expense|net|budgeted|spent|remaining)\s*:\s*(Int|Float)",
+        re.MULTILINE | re.IGNORECASE,
+    )
     assert not money.findall(SDL)
 
 

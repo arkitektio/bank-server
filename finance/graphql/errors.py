@@ -6,8 +6,8 @@ on accounts and connections, so a client handles both with one table.
 
 from kante.errors import KanteError, ValidationError
 
-from finance.providers.errors import LinkError
 from finance.errors import SyncBudgetExhausted, code_for
+from finance.providers.errors import LinkError
 
 
 def translate(error: Exception) -> Exception:
@@ -19,5 +19,9 @@ def translate(error: Exception) -> Exception:
     code = code_for(error)
     if code is None:
         return error
-    extensions = {"nextSyncAllowedAt": error.allowed_at.isoformat()} if isinstance(error, SyncBudgetExhausted) else {}
+    extensions = (
+        {"nextSyncAllowedAt": error.allowed_at.isoformat()}
+        if isinstance(error, SyncBudgetExhausted)
+        else {}
+    )
     return KanteError(str(error), code=str(code), extensions=extensions or None)

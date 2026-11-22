@@ -23,7 +23,9 @@ def _fernet(path: str) -> Fernet:
 def _current() -> Fernet:
     conf: dict[str, str] | None = getattr(settings, "ENCRYPTION", None)
     if not conf:
-        raise NotConfigured("This server has no encryption key for provider credentials (no `encryption` block in its config).")
+        raise NotConfigured(
+            "This server has no encryption key for provider credentials (no `encryption` block in its config)."
+        )
     return _fernet(conf["key_path"])
 
 

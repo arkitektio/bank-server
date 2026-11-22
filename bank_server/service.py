@@ -30,23 +30,52 @@ from arkitekt_service.service import Service, organization_of
 
 from bank_server import descriptors
 from bank_server.contract import contract
-
 from finance import models
 
-service = Service("bank", hosts=contract.description.hosts, description="Bank accounts, their transactions, categories and budgets.")
+service = Service(
+    "bank",
+    hosts=contract.description.hosts,
+    description="Bank accounts, their transactions, categories and budgets.",
+)
 
 
 # --- Structures: what bank hosts ------------------------------------------------------
 
-bankconnection = service.structure(models.BankConnection, "@bank/bankconnection", describe=descriptors.connection_descriptors)
-bankprovider = service.structure(models.BankProvider, "@bank/bankprovider", describe=descriptors.provider_descriptors)
-bank_account = service.structure(models.BankAccount, "@bank/bankaccount", describe=descriptors.account_descriptors)
-statementimport = service.structure(models.StatementImport, "@bank/statementimport", describe=descriptors.import_descriptors)
-recurringpayment = service.structure(models.RecurringPayment, "@bank/recurringpayment", describe=descriptors.recurring_descriptors)
-category = service.structure(models.Category, "@bank/category", describe=descriptors.category_descriptors)
-merchant = service.structure(models.Merchant, "@bank/merchant", describe=descriptors.merchant_descriptors)
-budget = service.structure(models.Budget, "@bank/budget", describe=descriptors.budget_descriptors)
-transaction = service.structure(models.Transaction, "@bank/transaction", describe=descriptors.transaction_descriptors)
+bankconnection = service.structure(
+    models.BankConnection,
+    "@bank/bankconnection",
+    describe=descriptors.connection_descriptors,
+)
+bankprovider = service.structure(
+    models.BankProvider, "@bank/bankprovider", describe=descriptors.provider_descriptors
+)
+bank_account = service.structure(
+    models.BankAccount, "@bank/bankaccount", describe=descriptors.account_descriptors
+)
+statementimport = service.structure(
+    models.StatementImport,
+    "@bank/statementimport",
+    describe=descriptors.import_descriptors,
+)
+recurringpayment = service.structure(
+    models.RecurringPayment,
+    "@bank/recurringpayment",
+    describe=descriptors.recurring_descriptors,
+)
+category = service.structure(
+    models.Category, "@bank/category", describe=descriptors.category_descriptors
+)
+merchant = service.structure(
+    models.Merchant, "@bank/merchant", describe=descriptors.merchant_descriptors
+)
+budget = service.structure(
+    models.Budget, "@bank/budget", describe=descriptors.budget_descriptors
+)
+transaction = service.structure(
+    models.Transaction,
+    "@bank/transaction",
+    describe=descriptors.transaction_descriptors,
+)
 
 
 # --- Signals: what bank announces ------------------------------------------------------
@@ -76,7 +105,9 @@ def restore_transactions(ids: Iterable[int]) -> int:
     Quietly: a transaction is announced when a user saves it, and a sync on its account
     (``finance.sync``). Loads only what the describer reads, never the embedding.
     """
-    rows = models.Transaction.objects.filter(id__in=list(ids)).only("id", "stored_descriptors", *descriptors.TRANSACTION_FIELDS)
+    rows = models.Transaction.objects.filter(id__in=list(ids)).only(
+        "id", "stored_descriptors", *descriptors.TRANSACTION_FIELDS
+    )
     return service.restore(rows, emit=False)
 
 

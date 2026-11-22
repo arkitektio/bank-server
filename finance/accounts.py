@@ -22,11 +22,19 @@ def by_iban(organization_id: int, iban: str | None, currency: str | None) -> Que
     normalized = normalize_iban(iban)
     if normalized is None:
         return models.BankAccount.objects.none()
-    accounts = models.BankAccount.objects.filter(organization_id=organization_id, iban_normalized=normalized)
+    accounts = models.BankAccount.objects.filter(
+        organization_id=organization_id, iban_normalized=normalized
+    )
     return accounts.filter(currency=currency) if currency else accounts
 
 
-def adoptable(organization_id: int, iban: str | None, currency: str | None, *, for_connection: models.BankConnection | None = None) -> models.BankAccount | None:
+def adoptable(
+    organization_id: int,
+    iban: str | None,
+    currency: str | None,
+    *,
+    for_connection: models.BankConnection | None = None,
+) -> models.BankAccount | None:
     """The one account with this IBAN and currency; None if there is none or several.
 
     ``for_connection`` (a link being completed) leaves out accounts a live syncer of the same
@@ -34,8 +42,15 @@ def adoptable(organization_id: int, iban: str | None, currency: str | None, *, f
     """
     candidates = by_iban(organization_id, iban, currency)
     if for_connection is not None:
-        live = Q(connection_id=for_connection.id) | Q(connection__status__in=[models.ConnectionStatus.ACTIVE, models.ConnectionStatus.PENDING])
-        fed = models.AccountSyncer.objects.filter(live, backend=for_connection.provider).values("account_id")
+        live = Q(connection_id=for_connection.id) | Q(
+            connection__status__in=[
+                models.ConnectionStatus.ACTIVE,
+                models.ConnectionStatus.PENDING,
+            ]
+        )
+        fed = models.AccountSyncer.objects.filter(
+            live, backend=for_connection.provider
+        ).values("account_id")
         candidates = candidates.exclude(id__in=fed)
     matches = list(candidates[:2])
     return matches[0] if len(matches) == 1 else None
@@ -63,10 +78,18 @@ def attach_syncer(
     syncer = (
         models.AccountSyncer.objects.select_for_update()
         .select_related("account")
-        .filter(organization_id=organization_id, backend=backend, identification_key=identification_key)
+        .filter(
+            organization_id=organization_id,
+            backend=backend,
+            identification_key=identification_key,
+        )
         .first()
     )
-    account = syncer.account if syncer else adoptable(organization_id, iban, currency, for_connection=connection)
+    account = (
+        syncer.account
+        if syncer
+        else adoptable(organization_id, iban, currency, for_connection=connection)
+    )
     if account is None:
         account = models.BankAccount(organization_id=organization_id)
     account.iban = iban or account.iban
@@ -78,7 +101,11 @@ def attach_syncer(
     account.save()
 
     if syncer is None:
-        syncer = models.AccountSyncer(organization_id=organization_id, backend=backend, identification_key=identification_key)
+        syncer = models.AccountSyncer(
+            organization_id=organization_id,
+            backend=backend,
+            identification_key=identification_key,
+        )
     syncer.account = account
     syncer.connection = connection
     syncer.remote_id = remote_id

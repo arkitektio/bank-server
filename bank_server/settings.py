@@ -10,8 +10,9 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
+
 from .configuration import Settings
 from .logs import build_logging
 
@@ -208,19 +209,31 @@ CATEGORIZATION = conf.categorization.model_dump()
 # service (what exists here: ``rekuest_service``) and the hook agent (what can be done here:
 # ``rekuest_hook``). Both read where rekuest is from the same ``rekuest_hook`` config block.
 REKUEST_SERVICE = (
-    {"REKUEST_URL": conf.rekuest_hook.rekuest_url, "SERVICE": conf.rekuest_hook.service, "MAX_SKEW": conf.rekuest_hook.max_skew}
+    {
+        "REKUEST_URL": conf.rekuest_hook.rekuest_url,
+        "SERVICE": conf.rekuest_hook.service,
+        "MAX_SKEW": conf.rekuest_hook.max_skew,
+    }
     if conf.rekuest_hook
     else None
 )
 REKUEST_HOOK = (
-    {"REKUEST_URL": conf.rekuest_hook.rekuest_url, "AGENT": conf.rekuest_hook.service, "MAX_SKEW": conf.rekuest_hook.max_skew}
+    {
+        "REKUEST_URL": conf.rekuest_hook.rekuest_url,
+        "AGENT": conf.rekuest_hook.service,
+        "MAX_SKEW": conf.rekuest_hook.max_skew,
+    }
     if conf.rekuest_hook
     else None
 )
 # This instance's key and the hub trust bundle (``arkitekt_service.trust``): requests to and from
 # rekuest are signed with instance keys the coord vouches for — no shared secrets.
 INSTANCE = (
-    {"PRIVATE_KEY": conf.instance.private_key, "TRUST_JWKS_URI": conf.instance.trust.jwks_uri, "TRUST_JWKS": conf.instance.trust.jwks}
+    {
+        "PRIVATE_KEY": conf.instance.private_key,
+        "TRUST_JWKS_URI": conf.instance.trust.jwks_uri,
+        "TRUST_JWKS": conf.instance.trust.jwks,
+    }
     if conf.instance
     else None
 )

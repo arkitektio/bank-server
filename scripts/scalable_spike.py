@@ -100,16 +100,32 @@ def claim(c: dict, name: str):
     return c.get(f"https://de.scalable.capital/{name}") or c.get(name)
 
 
-async def post(http: aiohttp.ClientSession, key: DpopKey, url: str, *, form=None, body=None, token=None):
+async def post(
+    http: aiohttp.ClientSession,
+    key: DpopKey,
+    url: str,
+    *,
+    form=None,
+    body=None,
+    token=None,
+):
     """One DPoP request with the CLI's single nonce retry."""
     nonce = None
     for attempt in range(2):
-        headers = {"DPoP": key.proof("POST", url, nonce=nonce, access_token=token), "User-Agent": USER_AGENT}
+        headers = {
+            "DPoP": key.proof("POST", url, nonce=nonce, access_token=token),
+            "User-Agent": USER_AGENT,
+        }
         if token:
             headers["Authorization"] = f"DPoP {token}"
         async with http.post(url, data=form, json=body, headers=headers) as r:
             text = await r.text()
-            if r.status >= 400 and attempt == 0 and r.headers.get("DPoP-Nonce") and "nonce" in text:
+            if (
+                r.status >= 400
+                and attempt == 0
+                and r.headers.get("DPoP-Nonce")
+                and "nonce" in text
+            ):
                 nonce = r.headers["DPoP-Nonce"]
                 note("dpop-nonce-challenge", url=url)
                 continue
@@ -118,15 +134,30 @@ async def post(http: aiohttp.ClientSession, key: DpopKey, url: str, *, form=None
 
 
 async def gql(http, key, token, op, query, variables):
-    status, headers, text = await post(http, key, GRAPHQL, body={"operationName": op, "query": query, "variables": variables}, token=token)
+    status, headers, text = await post(
+        http,
+        key,
+        GRAPHQL,
+        body={"operationName": op, "query": query, "variables": variables},
+        token=token,
+    )
     data = json.loads(text) if text.startswith("{") else {"raw": text}
-    write(OUT / f"gql-{op}.json", {"status": status, "variables": variables, "response": data})
-    note(f"gql:{op}", status=status, errors=(data.get("errors") if isinstance(data, dict) else None))
+    write(
+        OUT / f"gql-{op}.json",
+        {"status": status, "variables": variables, "response": data},
+    )
+    note(
+        f"gql:{op}",
+        status=status,
+        errors=(data.get("errors") if isinstance(data, dict) else None),
+    )
     return data.get("data") if isinstance(data, dict) else None
 
 
 async def token_request(http, key, form):
-    status, headers, text = await post(http, key, f"{ISSUER}/oauth/token", form={**form, "client_id": CLIENT_ID})
+    status, headers, text = await post(
+        http, key, f"{ISSUER}/oauth/token", form={**form, "client_id": CLIENT_ID}
+    )
     return status, json.loads(text) if text.startswith("{") else {"raw": text}
 
 
@@ -152,9 +183,15 @@ def remember(session: dict, tok: dict) -> None:
 
 async def login(http) -> dict:
     key = DpopKey.generate()
-    session = {"dpop_pem": key.to_pem(), "dpop_jkt": key.thumbprint, "logged_in_at": time.time()}
+    session = {
+        "dpop_pem": key.to_pem(),
+        "dpop_jkt": key.thumbprint,
+        "logged_in_at": time.time(),
+    }
     status, _, text = await post(
-        http, key, f"{ISSUER}/oauth/device/code",
+        http,
+        key,
+        f"{ISSUER}/oauth/device/code",
         form={"client_id": CLIENT_ID, "audience": AUDIENCE, "scope": SCOPE},
     )
     note("device-code", status=status)
@@ -162,15 +199,23 @@ async def login(http) -> dict:
         note("device-code-failed", body=text[:1000])
         raise SystemExit("device code request refused, see report.json")
     device = json.loads(text)
-    print("\n  Open:", device.get("verification_uri_complete") or device["verification_uri"])
+    print(
+        "\n  Open:",
+        device.get("verification_uri_complete") or device["verification_uri"],
+    )
     print("  Code:", device["user_code"], "\n")
     interval = device.get("interval", 5)
     deadline = time.time() + device["expires_in"]
     while time.time() < deadline:
         await asyncio.sleep(interval)
-        status, tok = await token_request(http, key, {
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code", "device_code": device["device_code"],
-        })
+        status, tok = await token_request(
+            http,
+            key,
+            {
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": device["device_code"],
+            },
+        )
         if status < 400:
             remember(session, tok)
             break
@@ -185,16 +230,35 @@ async def login(http) -> dict:
         raise SystemExit("device code expired")
 
     uid = session["person_id"]
-    state = await gql(http, key, session["access_token"], "Is2faOnLoginEnabled", Q_2FA_STATE, {"input": {"userId": uid}})
+    state = await gql(
+        http,
+        key,
+        session["access_token"],
+        "Is2faOnLoginEnabled",
+        Q_2FA_STATE,
+        {"input": {"userId": uid}},
+    )
     state = (state or {}).get("is2faOnLoginEnabled") or {}
     if state.get("enabled") and not state.get("hasApprovedSession"):
-        started = await gql(http, key, session["access_token"], "Start2faOnLogin", M_2FA_START,
-                            {"input": {"userId": uid, "deviceName": "CLI", "deviceType": "CLI"}})
+        started = await gql(
+            http,
+            key,
+            session["access_token"],
+            "Start2faOnLogin",
+            M_2FA_START,
+            {"input": {"userId": uid, "deviceName": "CLI", "deviceType": "CLI"}},
+        )
         mfa = started["start2faOnLogin"]["mfaSessionId"]
         print("  Approve the login on your trusted device...")
         for _ in range(60):
-            res = await gql(http, key, session["access_token"], "Validate2faOnLogin", M_2FA_VALIDATE,
-                            {"input": {"userId": uid, "mfaSessionId": mfa}})
+            res = await gql(
+                http,
+                key,
+                session["access_token"],
+                "Validate2faOnLogin",
+                M_2FA_VALIDATE,
+                {"input": {"userId": uid, "mfaSessionId": mfa}},
+            )
             st = res["validate2faOnLogin"]["status"]
             if st == "SUCCESS":
                 break
@@ -210,9 +274,14 @@ async def refresh(http, session) -> dict:
     if session.get("session_id"):
         form["session_id"] = session["session_id"]
     status, tok = await token_request(http, key, form)
-    note("refresh", status=status, age_hours=round((time.time() - session["logged_in_at"]) / 3600, 2),
-         error=tok.get("error") if status >= 400 else None,
-         rotated=bool(tok.get("refresh_token")) and tok.get("refresh_token") != session["refresh_token"])
+    note(
+        "refresh",
+        status=status,
+        age_hours=round((time.time() - session["logged_in_at"]) / 3600, 2),
+        error=tok.get("error") if status >= 400 else None,
+        rotated=bool(tok.get("refresh_token"))
+        and tok.get("refresh_token") != session["refresh_token"],
+    )
     if status >= 400:
         raise SystemExit("refresh failed, see report.json")
     remember(session, tok)
@@ -223,22 +292,65 @@ async def queries(http, session) -> None:
     key = DpopKey.from_pem(session["dpop_pem"])
     tok, uid = session["access_token"], session["person_id"]
     ids = await gql(http, key, tok, "ResolveBrokerIds", Q_RESOLVE, {"id": uid})
-    portfolios = [p["id"] for p in ((ids or {}).get("account") or {}).get("brokerPortfolios") or []]
+    portfolios = [
+        p["id"]
+        for p in ((ids or {}).get("account") or {}).get("brokerPortfolios") or []
+    ]
     note("portfolios", count=len(portfolios))
     for pid in portfolios[:1]:
         base = {"accountId": uid, "portfolioId": pid}
-        await gql(http, key, tok, "BrokerOverview", Q_OVERVIEW, {**base, "includeYearToDate": True})
-        await gql(http, key, tok, "BrokerHoldings", Q_HOLDINGS, {**base, "includeYearToDate": False, "quoteSource": None})
+        await gql(
+            http,
+            key,
+            tok,
+            "BrokerOverview",
+            Q_OVERVIEW,
+            {**base, "includeYearToDate": True},
+        )
+        await gql(
+            http,
+            key,
+            tok,
+            "BrokerHoldings",
+            Q_HOLDINGS,
+            {**base, "includeYearToDate": False, "quoteSource": None},
+        )
         await gql(http, key, tok, "BrokerLimits", Q_LIMITS, base)
-        await gql(http, key, tok, "BrokerTransactions", Q_TRANSACTIONS,
-                  {**base, "input": {"pageSize": 50, "cursor": None, "includeReinvestmentSubtypes": True}})
-    disc = await gql(http, key, tok, "DiscoverOvernightAccounts", Q_OVERNIGHT_DISCOVER, {"accountId": uid})
+        await gql(
+            http,
+            key,
+            tok,
+            "BrokerTransactions",
+            Q_TRANSACTIONS,
+            {
+                **base,
+                "input": {
+                    "pageSize": 50,
+                    "cursor": None,
+                    "includeReinvestmentSubtypes": True,
+                },
+            },
+        )
+    disc = await gql(
+        http,
+        key,
+        tok,
+        "DiscoverOvernightAccounts",
+        Q_OVERNIGHT_DISCOVER,
+        {"accountId": uid},
+    )
     for acc in ((disc or {}).get("account") or {}).get("savingsAccounts") or []:
         if acc.get("__typename") == "OvernightSavingsAccount":
             sid = {"accountId": uid, "savingsAccountId": acc["id"]}
             await gql(http, key, tok, "OvernightSummary", Q_OVERNIGHT_SUMMARY, sid)
-            await gql(http, key, tok, "OvernightTransactions", Q_OVERNIGHT_TX,
-                      {**sid, "input": {"pageSize": 50, "cursor": None}})
+            await gql(
+                http,
+                key,
+                tok,
+                "OvernightTransactions",
+                Q_OVERNIGHT_TX,
+                {**sid, "input": {"pageSize": 50, "cursor": None}},
+            )
             break
 
 

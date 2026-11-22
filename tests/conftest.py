@@ -79,24 +79,37 @@ def backend_stack():
         def db_ready() -> None:
             if "db" not in ports:
                 ports["db"] = e.get_port("db", 5432)
-            with psycopg.connect(dbname="testdb", user="test", password="test", host="localhost", port=ports["db"], connect_timeout=1) as connection:
+            with psycopg.connect(
+                dbname="testdb",
+                user="test",
+                password="test",
+                host="localhost",
+                port=ports["db"],
+                connect_timeout=1,
+            ) as connection:
                 connection.execute("SELECT 1")
 
         def fakebank_ready() -> None:
             if "fakebank" not in ports:
                 ports["fakebank"] = e.get_port("fakebank", 8000)
-            urllib.request.urlopen(f"http://localhost:{ports['fakebank']}/_admin/health", timeout=1).read()
+            urllib.request.urlopen(
+                f"http://localhost:{ports['fakebank']}/_admin/health", timeout=1
+            ).read()
 
         def fakescalable_ready() -> None:
             if "fakescalable" not in ports:
                 ports["fakescalable"] = e.get_port("fakescalable", 8000)
-            urllib.request.urlopen(f"http://localhost:{ports['fakescalable']}/_admin/health", timeout=1).read()
+            urllib.request.urlopen(
+                f"http://localhost:{ports['fakescalable']}/_admin/health", timeout=1
+            ).read()
 
         def rustfs_ready() -> None:
             if "rustfs" not in ports:
                 ports["rustfs"] = e.get_port("rustfs", 9000)
             try:
-                urllib.request.urlopen(f"http://localhost:{ports['rustfs']}/", timeout=1)
+                urllib.request.urlopen(
+                    f"http://localhost:{ports['rustfs']}/", timeout=1
+                )
             except urllib.error.HTTPError:
                 pass  # any S3 answer (403 to an anonymous request) means it is up
 
@@ -108,14 +121,18 @@ def backend_stack():
         def fakegeo_ready() -> None:
             if "fakegeo" not in ports:
                 ports["fakegeo"] = e.get_port("fakegeo", 8000)
-            urllib.request.urlopen(f"http://localhost:{ports['fakegeo']}/_admin/health", timeout=1).read()
+            urllib.request.urlopen(
+                f"http://localhost:{ports['fakegeo']}/_admin/health", timeout=1
+            ).read()
 
         _wait(fakegeo_ready, "fakegeo", timeout=180)
 
         def fakemarket_ready() -> None:
             if "fakemarket" not in ports:
                 ports["fakemarket"] = e.get_port("fakemarket", 8000)
-            urllib.request.urlopen(f"http://localhost:{ports['fakemarket']}/_admin/health", timeout=1).read()
+            urllib.request.urlopen(
+                f"http://localhost:{ports['fakemarket']}/_admin/health", timeout=1
+            ).read()
 
         _wait(fakemarket_ready, "fakemarket", timeout=180)
         yield Stack(
@@ -158,7 +175,9 @@ def django_db_setup(django_db_setup, django_db_blocker):
 
     with django_db_blocker.unblock():
         with connections["default"].cursor() as cursor:
-            cursor.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()")
+            cursor.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            )
         connections.close_all()
 
 
@@ -173,12 +192,31 @@ class Application:
     pem: str
 
 
-def register_application(fakebank_url: str, app_id: str, redirect_urls: list[str] | None = None) -> Application:
+def register_application(
+    fakebank_url: str, app_id: str, redirect_urls: list[str] | None = None
+) -> Application:
     """Generate a key pair, tell fakebank its public half, and return the application."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
-    public = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
-    _post(fakebank_url + "/_admin/keys", {"kid": app_id, "public_key": public, "redirect_urls": REDIRECTS if redirect_urls is None else redirect_urls})
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    public = (
+        key.public_key()
+        .public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        .decode()
+    )
+    _post(
+        fakebank_url + "/_admin/keys",
+        {
+            "kid": app_id,
+            "public_key": public,
+            "redirect_urls": REDIRECTS if redirect_urls is None else redirect_urls,
+        },
+    )
     return Application(app_id, pem)
 
 
@@ -191,9 +229,16 @@ def providers_endpoints(backend_stack, tmp_path_factory):
     key = tmp_path_factory.mktemp("keys") / "bank.fernet"
     key.write_bytes(Fernet.generate_key())
     settings.ENCRYPTION = {"key_path": str(key)}
-    settings.ENABLEBANKING = {**settings.ENABLEBANKING, "api_url": backend_stack.fakebank_url}
+    settings.ENABLEBANKING = {
+        **settings.ENABLEBANKING,
+        "api_url": backend_stack.fakebank_url,
+    }
     url = backend_stack.fakescalable_url
-    settings.SCALABLE = {**settings.SCALABLE, "issuer": url, "graphql_url": f"{url}/api/cli/graphql"}
+    settings.SCALABLE = {
+        **settings.SCALABLE,
+        "issuer": url,
+        "graphql_url": f"{url}/api/cli/graphql",
+    }
     yield
 
 
@@ -204,7 +249,12 @@ def application(backend_stack, providers_endpoints) -> Application:
 
 
 def _post(url: str, body: dict, method: str = "POST") -> dict:
-    request = urllib.request.Request(url, data=json.dumps(body).encode(), method=method, headers={"Content-Type": "application/json"})
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode(),
+        method=method,
+        headers={"Content-Type": "application/json"},
+    )
     with urllib.request.urlopen(request, timeout=10) as response:
         return json.loads(response.read() or b"{}")
 
@@ -223,9 +273,18 @@ class FakeBank:
 
     def scenario(self, accounts: list[dict]) -> None:
         """The accounts this test's bank offers (see :func:`account`)."""
-        _post(self.url + "/_admin/scenario", {"aspsp_name": self.aspsp, "accounts": accounts})
+        _post(
+            self.url + "/_admin/scenario",
+            {"aspsp_name": self.aspsp, "accounts": accounts},
+        )
 
-    def set_account(self, ident: str, transactions: list[dict] | None = None, balances: list[dict] | None = None, rate_limited: bool | None = None) -> None:
+    def set_account(
+        self,
+        ident: str,
+        transactions: list[dict] | None = None,
+        balances: list[dict] | None = None,
+        rate_limited: bool | None = None,
+    ) -> None:
         body: dict = {}
         if rate_limited is not None:
             body["rate_limited"] = rate_limited
@@ -269,12 +328,24 @@ class FakeScalable:
         self.url = url
         self.person = uuid.uuid4().hex
 
-    def seed(self, portfolios: dict | None = None, savings: dict | None = None, mfa: bool = False, person: str | None = None) -> None:
+    def seed(
+        self,
+        portfolios: dict | None = None,
+        savings: dict | None = None,
+        mfa: bool = False,
+        person: str | None = None,
+    ) -> None:
         """This test's person: ``{portfolio_id: {cash, holdings, transactions}}`` and ``{savings_id: {total, transactions}}``."""
-        _post(self.url + f"/_admin/people/{person or self.person}", {"portfolios": portfolios or {}, "savings": savings or {}, "mfa": mfa})
+        _post(
+            self.url + f"/_admin/people/{person or self.person}",
+            {"portfolios": portfolios or {}, "savings": savings or {}, "mfa": mfa},
+        )
 
     def approve(self, user_code: str, person: str | None = None) -> None:
-        _post(self.url + "/_admin/approve", {"user_code": user_code, "person": person or self.person})
+        _post(
+            self.url + "/_admin/approve",
+            {"user_code": user_code, "person": person or self.person},
+        )
 
     def deny(self, user_code: str) -> None:
         _post(self.url + "/_admin/deny", {"user_code": user_code})
@@ -305,32 +376,74 @@ class FakeScalable:
 
     def prices(self, series: dict[str, list[tuple[str, float]]]) -> None:
         """Market data for BrokerChart / BrokerQuote: ``{isin: [(day, mid price), …]}``."""
-        _post(self.url + "/_admin/prices", {isin: [list(p) for p in points] for isin, points in series.items()})
+        _post(
+            self.url + "/_admin/prices",
+            {isin: [list(p) for p in points] for isin, points in series.items()},
+        )
 
 
 @pytest.fixture
 def fakescalable(backend_stack) -> FakeScalable:
     fake = FakeScalable(backend_stack.fakescalable_url)
-    defaults = {"token_ttl": 1200, "interval": 5, "graphql_nonce_challenges": 0, "graphql_rejections": 0, "graphql_rate_limited": 0}
+    defaults = {
+        "token_ttl": 1200,
+        "interval": 5,
+        "graphql_nonce_challenges": 0,
+        "graphql_rejections": 0,
+        "graphql_rate_limited": 0,
+    }
     fake.config(**defaults)
     yield fake
     fake.release()
     fake.config(**defaults)
 
 
-def holding(isin: str, quantity: float, price: float, fifo: float, *, name: str | None = None, kind: str = "ETF") -> dict:
+def holding(
+    isin: str,
+    quantity: float,
+    price: float,
+    fifo: float,
+    *,
+    name: str | None = None,
+    kind: str = "ETF",
+) -> dict:
     """A depot position as Scalable's BrokerHoldings returns it."""
     return {
         "isin": isin,
         "name": name or f"Fund {isin}",
         "type": kind,
-        "inventory": {"position": {"filled": quantity, "pending": 0, "blocked": 0, "fifoPrice": fifo}},
-        "portfolioIsinPerformance": {"valuation": round(quantity * price, 2), "currency": "EUR"},
-        "quoteTick": {"midPrice": price, "currency": "EUR", "timestampUtc": {"time": "2026-09-25T21:00:00.000Z"}, "isOutdated": False},
+        "inventory": {
+            "position": {
+                "filled": quantity,
+                "pending": 0,
+                "blocked": 0,
+                "fifoPrice": fifo,
+            }
+        },
+        "portfolioIsinPerformance": {
+            "valuation": round(quantity * price, 2),
+            "currency": "EUR",
+        },
+        "quoteTick": {
+            "midPrice": price,
+            "currency": "EUR",
+            "timestampUtc": {"time": "2026-09-25T21:00:00.000Z"},
+            "isOutdated": False,
+        },
     }
 
 
-def trade(amount: float, when: str, isin: str, *, side: str = "BUY", quantity: float = 1, status: str = "SETTLED", id: str | None = None, name: str = "Some ETF") -> dict:
+def trade(
+    amount: float,
+    when: str,
+    isin: str,
+    *,
+    side: str = "BUY",
+    quantity: float = 1,
+    status: str = "SETTLED",
+    id: str | None = None,
+    name: str = "Some ETF",
+) -> dict:
     """A BrokerSecurityTransactionSummary; ``amount`` is signed (a buy is negative)."""
     return {
         "__typename": "BrokerSecurityTransactionSummary",
@@ -349,7 +462,16 @@ def trade(amount: float, when: str, isin: str, *, side: str = "BUY", quantity: f
     }
 
 
-def cash(amount: float, when: str, kind: str = "DEPOSIT", *, status: str = "SETTLED", id: str | None = None, description: str = "", isin: str | None = None) -> dict:
+def cash(
+    amount: float,
+    when: str,
+    kind: str = "DEPOSIT",
+    *,
+    status: str = "SETTLED",
+    id: str | None = None,
+    description: str = "",
+    isin: str | None = None,
+) -> dict:
     """A BrokerCashTransactionSummary (DEPOSIT, WITHDRAWAL, DISTRIBUTION, INTEREST, FEE, TAX, …)."""
     return {
         "__typename": "BrokerCashTransactionSummary",
@@ -368,18 +490,28 @@ def cash(amount: float, when: str, kind: str = "DEPOSIT", *, status: str = "SETT
 
 #: An auth session, as the external auth flow contract shapes it.
 SESSION = "state status finish openUrl expiresAt redirectUrl interval userCode step errorCode errorMessage result { identifier id label }"
-SCALABLE_START = "mutation Start($provider: ID!) { startLink(input: {provider: $provider}) { %s } }" % SESSION
-SCALABLE_COMPLETE = "mutation Complete($state: String!) { completeAuth(input: {state: $state}) { %s } }" % SESSION
+SCALABLE_START = (
+    "mutation Start($provider: ID!) { startLink(input: {provider: $provider}) { %s } }"
+    % SESSION
+)
+SCALABLE_COMPLETE = (
+    "mutation Complete($state: String!) { completeAuth(input: {state: $state}) { %s } }"
+    % SESSION
+)
 CONNECTION = """
 query($id: ID!) { bankConnection(id: $id) { id status linkStep lastError validUntil creator { id sub preferredUsername } accounts { id iban currency kind name } } }
 """
 
 
-async def connection_of(aexecute, session: dict, context: HttpContext | None = None) -> dict:
+async def connection_of(
+    aexecute, session: dict, context: HttpContext | None = None
+) -> dict:
     """The connection a DONE auth session linked, as a client reads it."""
     assert session["status"] == "DONE", session
     assert session["result"]["identifier"] == "@bank/connection"
-    return (await aexecute(CONNECTION, {"id": session["result"]["id"]}, context=context)).data["bankConnection"]
+    return (
+        await aexecute(CONNECTION, {"id": session["result"]["id"]}, context=context)
+    ).data["bankConnection"]
 
 
 @pytest.fixture
@@ -388,16 +520,34 @@ def scalable_link(aexecute, fakescalable, provider_for):
 
     async def _link(context: HttpContext | None = None) -> dict:
         provider = await provider_for("SCALABLE", context)
-        started = (await aexecute(SCALABLE_START, {"provider": provider}, context=context)).data["startLink"]
+        started = (
+            await aexecute(SCALABLE_START, {"provider": provider}, context=context)
+        ).data["startLink"]
         fakescalable.approve(started["userCode"])
-        completed = await connection_of(aexecute, (await aexecute(SCALABLE_COMPLETE, {"state": started["state"]}, context=context)).data["completeAuth"], context)
+        completed = await connection_of(
+            aexecute,
+            (
+                await aexecute(
+                    SCALABLE_COMPLETE, {"state": started["state"]}, context=context
+                )
+            ).data["completeAuth"],
+            context,
+        )
         assert completed["status"] == "ACTIVE", completed
         return completed
 
     return _link
 
 
-def account(ident: str | None = None, *, iban: str | None = None, currency: str = "EUR", name: str = "Giro", transactions: list[dict] | None = None, balance: str | None = None) -> dict:
+def account(
+    ident: str | None = None,
+    *,
+    iban: str | None = None,
+    currency: str = "EUR",
+    name: str = "Giro",
+    transactions: list[dict] | None = None,
+    balance: str | None = None,
+) -> dict:
     """An account for :meth:`FakeBank.scenario`."""
     ident = ident or uuid.uuid4().hex
     return {
@@ -407,11 +557,29 @@ def account(ident: str | None = None, *, iban: str | None = None, currency: str 
         "currency": currency,
         "product": "Checking",
         "transactions": transactions or [],
-        "balances": [{"balance_type": "CLBD", "balance_amount": {"amount": balance, "currency": currency}, "reference_date": None}] if balance is not None else [],
+        "balances": [
+            {
+                "balance_type": "CLBD",
+                "balance_amount": {"amount": balance, "currency": currency},
+                "reference_date": None,
+            }
+        ]
+        if balance is not None
+        else [],
     }
 
 
-def tx(amount: str, day: str, party: str | None = None, *, iban: str | None = None, remittance: str | None = None, status: str = "BOOK", ref: str | None = None, currency: str = "EUR") -> dict:
+def tx(
+    amount: str,
+    day: str,
+    party: str | None = None,
+    *,
+    iban: str | None = None,
+    remittance: str | None = None,
+    status: str = "BOOK",
+    ref: str | None = None,
+    currency: str = "EUR",
+) -> dict:
     """An Enable Banking transaction; a negative ``amount`` is money out."""
     debit = amount.startswith("-")
     side = "creditor" if debit else "debtor"
@@ -431,14 +599,34 @@ def tx(amount: str, day: str, party: str | None = None, *, iban: str | None = No
     return out
 
 
-def _context(token: str, sub: str, org_slug: str, roles: list[str] | None = None) -> HttpContext:
-    user, _ = User.objects.get_or_create(sub=sub, iss="static_issuer", defaults={"username": f"static_issuer_{sub}"})
+def _context(
+    token: str, sub: str, org_slug: str, roles: list[str] | None = None
+) -> HttpContext:
+    user, _ = User.objects.get_or_create(
+        sub=sub, iss="static_issuer", defaults={"username": f"static_issuer_{sub}"}
+    )
     client, _ = Client.objects.get_or_create(client_id="oinsoins")
     org, _ = Organization.objects.get_or_create(identifier=f"static_issuer#{org_slug}")
-    membership, _ = Membership.objects.update_or_create(user=user, organization=org, defaults={"roles": roles or ["bank_editor"]})
-    request = UniversalRequest(_extensions={"token": token}, _client=client, _user=user, _organization=org)  # type: ignore[arg-type]
+    membership, _ = Membership.objects.update_or_create(
+        user=user, organization=org, defaults={"roles": roles or ["bank_editor"]}
+    )
+    request = UniversalRequest(
+        _extensions={"token": token},
+        _client=client,  # type: ignore[arg-type]
+        _user=user,  # type: ignore[arg-type]
+        _organization=org,  # type: ignore[arg-type]
+    )
     request.set_membership(membership)  # type: ignore[arg-type]
-    return HttpContext(request=request, response=TemporalResponse(), headers={"Authorization": f"Bearer {token}", "User-Agent": "bank-tests", "X-Forwarded-For": "203.0.113.7"}, type="http")
+    return HttpContext(
+        request=request,
+        response=TemporalResponse(),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "bank-tests",
+            "X-Forwarded-For": "203.0.113.7",
+        },
+        type="http",
+    )
 
 
 @pytest.fixture
@@ -494,7 +682,12 @@ async def ws_contexts(authenticated_context):
                 await consumer.dispatch(await layer.receive(consumer.channel_name))
 
         pumps.append(asyncio.create_task(pump()))
-        return WsContext(request=UniversalRequest(_extensions={"token": token}), response=TemporalResponse(), connection_params={"token": token}, consumer=consumer)
+        return WsContext(
+            request=UniversalRequest(_extensions={"token": token}),
+            response=TemporalResponse(),
+            connection_params={"token": token},
+            consumer=consumer,
+        )
 
     yield make
     for task in pumps:
@@ -514,7 +707,9 @@ class Subscription:
         self.task: asyncio.Task | None = None
 
     async def _run(self) -> None:
-        stream = await schema.subscribe(self.query, variable_values=self.variables, context_value=self.context)
+        stream = await schema.subscribe(
+            self.query, variable_values=self.variables, context_value=self.context
+        )
         if not hasattr(stream, "__aiter__"):
             await self.events.put(stream)
             return
@@ -581,8 +776,15 @@ async def subscribe(ws_contexts):
     """Start a subscription as a static token; stopped after the test."""
     started: list[Subscription] = []
 
-    async def _start(query: str, variables: dict | None = None, token: str = "test", group: str | None = None) -> Subscription:
-        subscription = await Subscription(await ws_contexts(token), query, variables or {}).start(group)
+    async def _start(
+        query: str,
+        variables: dict | None = None,
+        token: str = "test",
+        group: str | None = None,
+    ) -> Subscription:
+        subscription = await Subscription(
+            await ws_contexts(token), query, variables or {}
+        ).start(group)
         started.append(subscription)
         return subscription
 
@@ -595,8 +797,17 @@ async def subscribe(ws_contexts):
 def aexecute(authenticated_context):
     """Run a GraphQL document as tenant A (or ``context``); fails the test on GraphQL errors unless ``allow_errors``."""
 
-    async def _run(query: str, variables: dict | None = None, context: HttpContext | None = None, allow_errors: bool = False):
-        result = await schema.execute(query, variable_values=variables or {}, context_value=context or authenticated_context)
+    async def _run(
+        query: str,
+        variables: dict | None = None,
+        context: HttpContext | None = None,
+        allow_errors: bool = False,
+    ):
+        result = await schema.execute(
+            query,
+            variable_values=variables or {},
+            context_value=context or authenticated_context,
+        )
         if not allow_errors:
             assert not result.errors, result.errors
         return result
@@ -604,7 +815,12 @@ def aexecute(authenticated_context):
     return _run
 
 
-def make_provider(organization: Organization, kind: str, application: Application | None = None, **fields) -> "models.BankProvider":  # noqa: ANN003, F821
+def make_provider(
+    organization: Organization,
+    kind: str,
+    application: Application | None = None,
+    **fields,
+) -> "models.BankProvider":  # noqa: ANN003, F821
     """A provider row as an admin's mutation would leave it (``tests/test_providers.py`` covers the mutations themselves)."""
     from finance import crypto, models
     from finance.providers.enablebanking import read_key
@@ -618,9 +834,17 @@ def make_provider(organization: Organization, kind: str, application: Applicatio
     }
     if kind == "ENABLEBANKING":
         assert application is not None
-        values["settings"] = {"app_id": application.app_id, "redirect_urls": REDIRECTS, "consent_days": 90, "psu_type": "personal", "key_fingerprint": read_key(application.pem)[1]}
+        values["settings"] = {
+            "app_id": application.app_id,
+            "redirect_urls": REDIRECTS,
+            "consent_days": 90,
+            "psu_type": "personal",
+            "key_fingerprint": read_key(application.pem)[1],
+        }
         values["secret"] = crypto.encrypt(application.pem)
-    return models.BankProvider.objects.create(organization=organization, kind=kind, **{**values, **fields})
+    return models.BankProvider.objects.create(
+        organization=organization, kind=kind, **{**values, **fields}
+    )
 
 
 @pytest.fixture
@@ -632,10 +856,16 @@ def provider_for(authenticated_context, application):
 
     def _get(kind: str, context: HttpContext | None) -> str:
         organization = (context or authenticated_context).request.organization
-        row = models.BankProvider.objects.filter(organization=organization, kind=kind).order_by("id").first()
+        row = (
+            models.BankProvider.objects.filter(organization=organization, kind=kind)
+            .order_by("id")
+            .first()
+        )
         return str((row or make_provider(organization, kind, application)).id)
 
-    async def _provider(kind: str = "ENABLEBANKING", context: HttpContext | None = None) -> str:
+    async def _provider(
+        kind: str = "ENABLEBANKING", context: HttpContext | None = None
+    ) -> str:
         return await database_sync_to_async(_get)(kind, context)
 
     return _provider
@@ -644,7 +874,11 @@ def provider_for(authenticated_context, application):
 @pytest.fixture
 def eb_provider(authenticated_context, application) -> str:
     """Tenant A's Enable Banking provider (its id), for tests that start links themselves."""
-    return str(make_provider(authenticated_context.request.organization, "ENABLEBANKING", application).id)
+    return str(
+        make_provider(
+            authenticated_context.request.organization, "ENABLEBANKING", application
+        ).id
+    )
 
 
 @pytest.fixture
@@ -653,8 +887,14 @@ def sc_provider(authenticated_context) -> str:
     return str(make_provider(authenticated_context.request.organization, "SCALABLE").id)
 
 
-LINK = 'mutation Start($provider: ID!, $aspsp: String!) { startLink(input: {provider: $provider, institution: $aspsp, country: "AT"}) { %s } }' % SESSION
-COMPLETE = "mutation Complete($code: String, $state: String!, $error: String, $description: String) { completeAuth(input: {code: $code, state: $state, error: $error, errorDescription: $description}) { %s } }" % SESSION
+LINK = (
+    'mutation Start($provider: ID!, $aspsp: String!) { startLink(input: {provider: $provider, institution: $aspsp, country: "AT"}) { %s } }'
+    % SESSION
+)
+COMPLETE = (
+    "mutation Complete($code: String, $state: String!, $error: String, $description: String) { completeAuth(input: {code: $code, state: $state, error: $error, errorDescription: $description}) { %s } }"
+    % SESSION
+)
 
 
 @pytest.fixture
@@ -663,10 +903,14 @@ def link(aexecute, fakebank, provider_for):
 
     async def _link(context: HttpContext | None = None) -> dict:
         provider = await provider_for("ENABLEBANKING", context)
-        started = await aexecute(LINK, {"provider": provider, "aspsp": fakebank.aspsp}, context=context)
+        started = await aexecute(
+            LINK, {"provider": provider, "aspsp": fakebank.aspsp}, context=context
+        )
         state = started.data["startLink"]["state"]
         code = fakebank.approve(state)
-        completed = await aexecute(COMPLETE, {"code": code, "state": state}, context=context)
+        completed = await aexecute(
+            COMPLETE, {"code": code, "state": state}, context=context
+        )
         return await connection_of(aexecute, completed.data["completeAuth"], context)
 
     return _link
@@ -675,16 +919,25 @@ def link(aexecute, fakebank, provider_for):
 @pytest.fixture(scope="session")
 def datalayer(backend_stack):
     """The datalayer pointed at the stack's RustFS (root keys, as the deployment's service user), with its bucket."""
+    import arkitekt_datalayer.datalayer as dl_module
     import boto3
     from botocore.config import Config
     from django.conf import settings
 
-    import arkitekt_datalayer.datalayer as dl_module
-
-    settings.DATALAYER = {**settings.DATALAYER, "access_key": "banktestroot", "secret_key": "banktestrootsecret", "port": backend_stack.rustfs_port}
+    settings.DATALAYER = {
+        **settings.DATALAYER,
+        "access_key": "banktestroot",
+        "secret_key": "banktestrootsecret",
+        "port": backend_stack.rustfs_port,
+    }
     dl_module.GLOBAL_DL = None
     s3 = boto3.client(
-        "s3", endpoint_url=f"http://localhost:{backend_stack.rustfs_port}", aws_access_key_id="banktestroot", aws_secret_access_key="banktestrootsecret", region_name="us-east-1", config=Config(signature_version="s3v4")
+        "s3",
+        endpoint_url=f"http://localhost:{backend_stack.rustfs_port}",
+        aws_access_key_id="banktestroot",
+        aws_secret_access_key="banktestrootsecret",
+        region_name="us-east-1",
+        config=Config(signature_version="s3v4"),
     )
     bucket = settings.DATALAYER["bigfile"]["bucket"]
     if bucket not in {b["Name"] for b in s3.list_buckets().get("Buckets", [])}:
@@ -705,8 +958,14 @@ def upload(aexecute, datalayer, backend_stack):
     import boto3
     from botocore.config import Config
 
-    async def _upload(content: bytes, name: str = "export.xlsx", context: HttpContext | None = None) -> str:
-        grant = (await aexecute(REQUEST_UPLOAD, {"name": name, "size": len(content)}, context=context)).data["requestBigfileUpload"]
+    async def _upload(
+        content: bytes, name: str = "export.xlsx", context: HttpContext | None = None
+    ) -> str:
+        grant = (
+            await aexecute(
+                REQUEST_UPLOAD, {"name": name, "size": len(content)}, context=context
+            )
+        ).data["requestBigfileUpload"]
         s3 = boto3.client(
             "s3",
             endpoint_url=f"http://localhost:{backend_stack.rustfs_port}",
@@ -717,7 +976,9 @@ def upload(aexecute, datalayer, backend_stack):
             config=Config(signature_version="s3v4"),
         )
         s3.put_object(Bucket=grant["bucket"], Key=grant["key"], Body=content)
-        finished = (await aexecute(FINISH_UPLOAD, {"id": grant["store"]}, context=context)).data["finishBigfileUpload"]
+        finished = (
+            await aexecute(FINISH_UPLOAD, {"id": grant["store"]}, context=context)
+        ).data["finishBigfileUpload"]
         assert finished["sizeBytes"] == len(content)
         return grant["store"]
 
@@ -746,7 +1007,12 @@ class FakeGeo:
 @pytest.fixture
 def fakegeo(backend_stack, settings) -> FakeGeo:
     """Point geocoding at fakegeo, with no places until the test adds some."""
-    settings.GEOCODING = {**settings.GEOCODING, "enabled": True, "url": backend_stack.fakegeo_url, "country_codes": None}
+    settings.GEOCODING = {
+        **settings.GEOCODING,
+        "enabled": True,
+        "url": backend_stack.fakegeo_url,
+        "country_codes": None,
+    }
     geo = FakeGeo(backend_stack.fakegeo_url)
     geo.reset()
     yield geo
@@ -764,7 +1030,14 @@ def prices_offline(backend_stack):
     from django.conf import settings
 
     url = backend_stack.fakemarket_url
-    settings.PRICES = {**settings.PRICES, "openfigi_url": url, "yahoo_url": url, "twelvedata_url": url, "twelvedata_api_key": None, "yahoo_enabled": True}
+    settings.PRICES = {
+        **settings.PRICES,
+        "openfigi_url": url,
+        "yahoo_url": url,
+        "twelvedata_url": url,
+        "twelvedata_api_key": None,
+        "yahoo_enabled": True,
+    }
     yield settings.PRICES
 
 
@@ -793,4 +1066,3 @@ def fakemarket(backend_stack, settings) -> FakeMarket:
     market.reset()
     yield market
     market.reset()
-

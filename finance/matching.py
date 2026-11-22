@@ -51,15 +51,26 @@ def _get(row: Any, name: str) -> Any:  # noqa: ANN401 - a dict of model fields o
 
 def booking_day(row: Any) -> date | None:  # noqa: ANN401
     """The day a row was booked (else took effect, else was made)."""
-    return _get(row, "booking_date") or _get(row, "value_date") or _get(row, "transaction_date")
+    return (
+        _get(row, "booking_date")
+        or _get(row, "value_date")
+        or _get(row, "transaction_date")
+    )
 
 
-def pair(candidates: Sequence[A], pool: Sequence[B], window: int | None = None, day: Callable[[Any], date | None] = booking_day) -> dict[int, B]:
+def pair(
+    candidates: Sequence[A],
+    pool: Sequence[B],
+    window: int | None = None,
+    day: Callable[[Any], date | None] = booking_day,
+) -> dict[int, B]:
     """Pair ``candidates`` with ``pool`` rows describing the same booking; ``{candidate index: pool row}``."""
     window = window_days() if window is None else window
     by_amount: dict[tuple[Decimal, str], list[tuple[int, B]]] = defaultdict(list)
     for index, row in enumerate(pool):
-        by_amount[(Decimal(_get(row, "amount")), _get(row, "currency"))].append((index, row))
+        by_amount[(Decimal(_get(row, "amount")), _get(row, "currency"))].append(
+            (index, row)
+        )
 
     options: list[tuple[int, int, int]] = []
     for c_index, candidate in enumerate(candidates):
@@ -67,7 +78,9 @@ def pair(candidates: Sequence[A], pool: Sequence[B], window: int | None = None, 
         if c_day is None:
             continue
         c_iban = normalize_iban(_get(candidate, "counterparty_iban"))
-        for p_index, row in by_amount.get((Decimal(_get(candidate, "amount")), _get(candidate, "currency")), []):
+        for p_index, row in by_amount.get(
+            (Decimal(_get(candidate, "amount")), _get(candidate, "currency")), []
+        ):
             p_day = day(row)
             if p_day is None:
                 continue
@@ -90,11 +103,21 @@ def pair(candidates: Sequence[A], pool: Sequence[B], window: int | None = None, 
     return pairs
 
 
-def pool_for(account: models.BankAccount, origin: str, days: Sequence[date | None], window: int | None = None) -> QuerySet:
+def pool_for(
+    account: models.BankAccount,
+    origin: str,
+    days: Sequence[date | None],
+    window: int | None = None,
+) -> QuerySet:
     """The account's booked rows of ``origin`` that could pair with rows booked on ``days``."""
     window = window_days() if window is None else window
     known = [d for d in days if d is not None]
-    rows = account.transactions.filter(origin=origin, status=models.TransactionStatus.BOOKED)
+    rows = account.transactions.filter(
+        origin=origin, status=models.TransactionStatus.BOOKED
+    )
     if not known:
         return rows.none()
-    return rows.filter(booking_date__gte=min(known) - timedelta(days=window), booking_date__lte=max(known) + timedelta(days=window))
+    return rows.filter(
+        booking_date__gte=min(known) - timedelta(days=window),
+        booking_date__lte=max(known) + timedelta(days=window),
+    )

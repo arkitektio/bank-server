@@ -37,9 +37,17 @@ def code_for(error: BaseException) -> BankErrorCode | None:
     if isinstance(error, GeocodingDisabled):
         return BankErrorCode.NOT_CONFIGURED
     if isinstance(error, PriceError):
-        return BankErrorCode.BANK_UNAVAILABLE if error.status == 0 or error.status >= 500 else BankErrorCode.BANK_ERROR
+        return (
+            BankErrorCode.BANK_UNAVAILABLE
+            if error.status == 0 or error.status >= 500
+            else BankErrorCode.BANK_ERROR
+        )
     if isinstance(error, GeocodingError):
-        return BankErrorCode.BANK_UNAVAILABLE if error.status == 0 or error.status >= 500 else BankErrorCode.BANK_ERROR
+        return (
+            BankErrorCode.BANK_UNAVAILABLE
+            if error.status == 0 or error.status >= 500
+            else BankErrorCode.BANK_ERROR
+        )
     if isinstance(error, (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError)):
         return BankErrorCode.BANK_UNAVAILABLE
     if isinstance(error, ConnectionInactive):

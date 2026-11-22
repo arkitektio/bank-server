@@ -36,7 +36,10 @@ class MakePoint(Func):
 
 def point(longitude: float, latitude: float) -> MakePoint:
     """A literal point, for comparing a column against."""
-    return MakePoint(Value(float(longitude), output_field=FloatField()), Value(float(latitude), output_field=FloatField()))
+    return MakePoint(
+        Value(float(longitude), output_field=FloatField()),
+        Value(float(latitude), output_field=FloatField()),
+    )
 
 
 class DistanceMeters(Func):
@@ -55,7 +58,9 @@ class DWithin(Func):
     output_field = BooleanField()
 
 
-def near(prefix: str, field: str, latitude: float, longitude: float, radius_meters: float) -> tuple[dict[str, Any], dict[str, Any]]:
+def near(
+    prefix: str, field: str, latitude: float, longitude: float, radius_meters: float
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """The annotations and the filter kwargs for "``prefix+field`` within ``radius_meters`` of (lat, lon)".
 
     Returns ``(annotations, filter)`` so a strawberry filter can annotate the distance (clients
@@ -64,19 +69,28 @@ def near(prefix: str, field: str, latitude: float, longitude: float, radius_mete
     column = F(f"{prefix}{field}")
     here = point(longitude, latitude)
     return (
-        {"_distance_meters": DistanceMeters(column, here), "_within": DWithin(column, here, Value(float(radius_meters), output_field=FloatField()))},
+        {
+            "_distance_meters": DistanceMeters(column, here),
+            "_within": DWithin(
+                column, here, Value(float(radius_meters), output_field=FloatField())
+            ),
+        },
         {"_within": True},
     )
 
 
-def nearest_location_meters(latitude: float, longitude: float, outer: str = "pk") -> Any:
+def nearest_location_meters(
+    latitude: float, longitude: float, outer: str = "pk"
+) -> Any:
     """A subquery: the distance from (lat, lon) to the merchant's (``OuterRef(outer)``) closest located store."""
     from django.db.models import OuterRef, Subquery
 
     from finance import models
 
     distances = (
-        models.MerchantLocation.objects.filter(merchant=OuterRef(outer), point__isnull=False)
+        models.MerchantLocation.objects.filter(
+            merchant=OuterRef(outer), point__isnull=False
+        )
         .annotate(_d=DistanceMeters(F("point"), point(longitude, latitude)))
         .order_by("_d")
         .values("_d")[:1]
@@ -108,9 +122,16 @@ class AsGeoJSON(Func):
     output_field = models.TextField()
 
 
-def within(prefix: str, field: str, south: float, west: float, north: float, east: float) -> tuple[dict[str, Any], dict[str, Any]]:
+def within(
+    prefix: str, field: str, south: float, west: float, north: float, east: float
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Annotations and filter kwargs for "``prefix+field`` inside the lat/lon box" — a map's viewport."""
-    box = Envelope(*(Value(float(v), output_field=FloatField()) for v in (west, south, east, north)))
+    box = Envelope(
+        *(
+            Value(float(v), output_field=FloatField())
+            for v in (west, south, east, north)
+        )
+    )
     return {"_in_bounds": Intersects(F(f"{prefix}{field}"), box)}, {"_in_bounds": True}
 
 
@@ -130,7 +151,12 @@ class SnapToGrid(Func):
     output_field = GeographyPointField()
 
     def __init__(self, geometry: Any, dx: float, dy: float, **extra: Any) -> None:
-        super().__init__(geometry, Value(float(dx), output_field=FloatField()), Value(float(dy), output_field=FloatField()), **extra)
+        super().__init__(
+            geometry,
+            Value(float(dx), output_field=FloatField()),
+            Value(float(dy), output_field=FloatField()),
+            **extra,
+        )
 
 
 class PointX(Func):

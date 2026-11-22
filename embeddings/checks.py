@@ -20,7 +20,11 @@ from embeddings.models import EmbeddedDescriptionMixin
 
 def embedded_models() -> list[type[EmbeddedDescriptionMixin]]:
     """Every concrete installed model that mixes in :class:`EmbeddedDescriptionMixin`."""
-    return [model for model in apps.get_models() if issubclass(model, EmbeddedDescriptionMixin)]
+    return [
+        model
+        for model in apps.get_models()
+        if issubclass(model, EmbeddedDescriptionMixin)
+    ]
 
 
 @register(Tags.compatibility)
@@ -35,12 +39,19 @@ def check_model_dimensions(app_configs: Any, **kwargs: Any) -> list[Error | Warn
     except engine.EmbeddingsUnavailable as exc:
         # Not fatal: rows embed on the healer's next pass once the weights are reachable, and
         # ``search`` degrades to its lexical leg meanwhile. Say so loudly, though.
-        return [Warning(f"{exc}. Rows will not be embedded and search is substring-only until the model loads.", id="embeddings.W001")]
+        return [
+            Warning(
+                f"{exc}. Rows will not be embedded and search is substring-only until the model loads.",
+                id="embeddings.W001",
+            )
+        ]
     return []
 
 
 @register(Tags.database)
-def check_column_dimensions(app_configs: Any, databases: Any = None, **kwargs: Any) -> list[Error]:
+def check_column_dimensions(
+    app_configs: Any, databases: Any = None, **kwargs: Any
+) -> list[Error]:
     """``embeddings.E002``: a ``vector(N)`` column whose N is not ``EMBEDDINGS.DIMENSIONS``.
 
     Skipped for columns that do not exist yet (the migration adding them has not run).
@@ -54,7 +65,9 @@ def check_column_dimensions(app_configs: Any, databases: Any = None, **kwargs: A
         if connection.vendor != "postgresql":
             continue
         for model in embedded_models():
-            have = engine.column_dimensions(connection, model._meta.db_table, "embedding")
+            have = engine.column_dimensions(
+                connection, model._meta.db_table, "embedding"
+            )
             if have is not None and have != want:
                 errors.append(
                     Error(

@@ -59,7 +59,13 @@ async def verify_jwt(request: web.Request, handler):  # noqa: ANN001, ANN201
         key = STATE["keys"].get(kid)
         if key is None:
             return _error(401, "UNAUTHORIZED", f"unknown application {kid!r}")
-        jwt.decode(token, key, algorithms=["RS256"], audience="api.enablebanking.com", issuer="enablebanking.com")
+        jwt.decode(
+            token,
+            key,
+            algorithms=["RS256"],
+            audience="api.enablebanking.com",
+            issuer="enablebanking.com",
+        )
         request["kid"] = kid
     except jwt.PyJWTError as error:
         return _error(401, "UNAUTHORIZED", f"invalid JWT: {error}")
@@ -82,14 +88,34 @@ async def verify_jwt(request: web.Request, handler):  # noqa: ANN001, ANN201
 async def application(request: web.Request) -> web.Response:
     kid = request["kid"]
     return web.json_response(
-        {"name": f"Fake application {kid}", "description": "", "kid": kid, "environment": "SANDBOX", "redirect_urls": STATE["redirects"].get(kid, []), "active": True, "countries": ["AT"], "services": ["AIS"]}
+        {
+            "name": f"Fake application {kid}",
+            "description": "",
+            "kid": kid,
+            "environment": "SANDBOX",
+            "redirect_urls": STATE["redirects"].get(kid, []),
+            "active": True,
+            "countries": ["AT"],
+            "services": ["AIS"],
+        }
     )
 
 
 async def aspsps(request: web.Request) -> web.Response:
     country = request.query.get("country")
-    banks = [{"name": name, "country": "AT", "bic": "FAKEATWW", "logo": None, "maximum_consent_validity": 180 * 86400} for name in STATE["scenarios"]]
-    return web.json_response({"aspsps": [b for b in banks if not country or b["country"] == country]})
+    banks = [
+        {
+            "name": name,
+            "country": "AT",
+            "bic": "FAKEATWW",
+            "logo": None,
+            "maximum_consent_validity": 180 * 86400,
+        }
+        for name in STATE["scenarios"]
+    ]
+    return web.json_response(
+        {"aspsps": [b for b in banks if not country or b["country"] == country]}
+    )
 
 
 async def auth(request: web.Request) -> web.Response:
@@ -97,8 +123,17 @@ async def auth(request: web.Request) -> web.Response:
     name = body["aspsp"]["name"]
     if name not in STATE["scenarios"]:
         return _error(422, "ASPSP_NOT_FOUND", f"unknown bank {name!r}")
-    STATE["auths"][body["state"]] = {"aspsp": name, "redirect_url": body["redirect_url"], "valid_until": body["access"]["valid_until"]}
-    return web.json_response({"url": f"https://fakebank.test/login?state={body['state']}", "authorization_id": uuid.uuid4().hex})
+    STATE["auths"][body["state"]] = {
+        "aspsp": name,
+        "redirect_url": body["redirect_url"],
+        "valid_until": body["access"]["valid_until"],
+    }
+    return web.json_response(
+        {
+            "url": f"https://fakebank.test/login?state={body['state']}",
+            "authorization_id": uuid.uuid4().hex,
+        }
+    )
 
 
 async def create_session(request: web.Request) -> web.Response:
@@ -119,8 +154,18 @@ async def create_session(request: web.Request) -> web.Response:
         uid = uuid.uuid4().hex
         uids[uid] = ident
         STATE["uids"][uid] = session_id
-        accounts.append({**STATE["accounts"][ident]["account"], "uid": uid, "identification_hash": ident})
-    STATE["sessions"][session_id] = {"status": "AUTHORIZED", "uids": uids, "valid_until": pending["valid_until"]}
+        accounts.append(
+            {
+                **STATE["accounts"][ident]["account"],
+                "uid": uid,
+                "identification_hash": ident,
+            }
+        )
+    STATE["sessions"][session_id] = {
+        "status": "AUTHORIZED",
+        "uids": uids,
+        "valid_until": pending["valid_until"],
+    }
     return web.json_response(
         {
             "session_id": session_id,
@@ -136,7 +181,13 @@ async def get_session(request: web.Request) -> web.Response:
     session = STATE["sessions"].get(request.match_info["id"])
     if session is None:
         return _error(404, "SESSION_DOES_NOT_EXIST")
-    return web.json_response({"status": session["status"], "accounts": list(session["uids"]), "access": {"valid_until": session["valid_until"]}})
+    return web.json_response(
+        {
+            "status": session["status"],
+            "accounts": list(session["uids"]),
+            "access": {"valid_until": session["valid_until"]},
+        }
+    )
 
 
 async def delete_session(request: web.Request) -> web.Response:
@@ -169,15 +220,26 @@ async def transactions(request: web.Request) -> web.Response:
             STATE["held"] -= 1
     if account.get("rate_limited"):
         # The bank's PSD2 access limit for today is used up (no Retry-After, as banks send it).
-        return _error(429, "ASPSP_RATE_LIMIT_EXCEEDED", "too many requests for this account today")
+        return _error(
+            429, "ASPSP_RATE_LIMIT_EXCEEDED", "too many requests for this account today"
+        )
     rows = account["transactions"]
     if "date_from" in request.query:
         since = request.query["date_from"]
-        rows = [t for t in rows if (t.get("booking_date") or t.get("transaction_date") or "") >= since]
+        rows = [
+            t
+            for t in rows
+            if (t.get("booking_date") or t.get("transaction_date") or "") >= since
+        ]
     start = int(request.query.get("continuation_key") or 0)
     page = rows[start : start + PAGE_SIZE]
     more = start + PAGE_SIZE < len(rows)
-    return web.json_response({"transactions": page, "continuation_key": str(start + PAGE_SIZE) if more else None})
+    return web.json_response(
+        {
+            "transactions": page,
+            "continuation_key": str(start + PAGE_SIZE) if more else None,
+        }
+    )
 
 
 async def balances(request: web.Request) -> web.Response:
@@ -203,7 +265,11 @@ async def admin_scenario(request: web.Request) -> web.Response:
     for account in body["accounts"]:
         ident = account["identification_hash"]
         STATE["accounts"][ident] = {
-            "account": {k: v for k, v in account.items() if k not in ("transactions", "balances")},
+            "account": {
+                k: v
+                for k, v in account.items()
+                if k not in ("transactions", "balances")
+            },
             "transactions": account.get("transactions", []),
             "balances": account.get("balances", []),
         }

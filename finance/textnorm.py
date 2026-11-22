@@ -15,15 +15,74 @@ import re
 BOILERPLATE = frozenset(
     {
         # German banking
-        "dankt", "danke", "sagt", "filiale", "kartenzahlung", "karte", "bankomat-zahlung", "lastschrift", "einzug",
-        "zahlung", "überweisung", "ueberweisung", "dauerauftrag", "auftrag", "gutschrift", "belastung", "ref", "nr",
-        "zahlungsreferenz", "verwendungszweck", "empfänger", "auftraggeber", "vom", "von", "an", "für", "fuer", "und",
+        "dankt",
+        "danke",
+        "sagt",
+        "filiale",
+        "kartenzahlung",
+        "karte",
+        "bankomat-zahlung",
+        "lastschrift",
+        "einzug",
+        "zahlung",
+        "überweisung",
+        "ueberweisung",
+        "dauerauftrag",
+        "auftrag",
+        "gutschrift",
+        "belastung",
+        "ref",
+        "nr",
+        "zahlungsreferenz",
+        "verwendungszweck",
+        "empfänger",
+        "auftraggeber",
+        "vom",
+        "von",
+        "an",
+        "für",
+        "fuer",
+        "und",
         # legal forms and web noise
-        "gmbh", "ag", "kg", "og", "mbh", "ges", "co", "eu", "e.u", "inc", "ltd", "llc", "www", "com", "at", "de",
+        "gmbh",
+        "ag",
+        "kg",
+        "og",
+        "mbh",
+        "ges",
+        "co",
+        "eu",
+        "e.u",
+        "inc",
+        "ltd",
+        "llc",
+        "www",
+        "com",
+        "at",
+        "de",
         # English card/SEPA noise
-        "sepa", "pos", "purchase", "payment", "card", "debit", "credit", "transfer", "the", "and", "of",
+        "sepa",
+        "pos",
+        "purchase",
+        "payment",
+        "card",
+        "debit",
+        "credit",
+        "transfer",
+        "the",
+        "and",
+        "of",
         # cities that end up on every card line
-        "wien", "graz", "linz", "salzburg", "innsbruck", "klagenfurt", "villach", "wels", "berlin", "münchen",
+        "wien",
+        "graz",
+        "linz",
+        "salzburg",
+        "innsbruck",
+        "klagenfurt",
+        "villach",
+        "wels",
+        "berlin",
+        "münchen",
     }
 )
 
@@ -37,7 +96,11 @@ def normalize(text: str | None) -> str | None:
     words = []
     for token in _TOKEN.findall(text.lower()):
         token = token.strip(".-'*+")
-        if len(token) < 2 or any(char.isdigit() for char in token) or token in BOILERPLATE:
+        if (
+            len(token) < 2
+            or any(char.isdigit() for char in token)
+            or token in BOILERPLATE
+        ):
             continue
         words.append(token)
     return " ".join(words) or None
@@ -52,13 +115,25 @@ def context_words(text: str | None) -> str | None:
     if not text:
         return None
     words = [token.strip(".-'*+") for token in _TOKEN.findall(text.lower())]
-    return " ".join(w for w in words if len(w) >= 2 and not any(char.isdigit() for char in w)) or None
+    return (
+        " ".join(
+            w for w in words if len(w) >= 2 and not any(char.isdigit() for char in w)
+        )
+        or None
+    )
 
 
-def transaction_text(counterparty: str | None, remittance: str | None, kind: str | None, merchant_context: str | None = None) -> str | None:
+def transaction_text(
+    counterparty: str | None,
+    remittance: str | None,
+    kind: str | None,
+    merchant_context: str | None = None,
+) -> str | None:
     """What a transaction is embedded as: its bank line (normalized), then what its merchant and place say."""
     kind_words = kind.replace("_", " ") if kind else None
-    line = normalize(" ".join(part for part in (counterparty, remittance, kind_words) if part))
+    line = normalize(
+        " ".join(part for part in (counterparty, remittance, kind_words) if part)
+    )
     return " ".join(part for part in (line, merchant_context) if part) or None
 
 

@@ -13,7 +13,17 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db.models import Case, Count, DecimalField, IntegerField, Q, QuerySet, Sum, Value, When
+from django.db.models import (
+    Case,
+    Count,
+    DecimalField,
+    IntegerField,
+    Q,
+    QuerySet,
+    Sum,
+    Value,
+    When,
+)
 from django.db.models.functions import Coalesce, TruncMonth, TruncWeek
 
 from finance import models
@@ -22,7 +32,11 @@ ZERO = Decimal("0.00")
 
 
 def _money_sum(expression: Q | None = None) -> Coalesce:
-    return Coalesce(Sum("amount", filter=expression), Value(ZERO), output_field=DecimalField(max_digits=18, decimal_places=2))
+    return Coalesce(
+        Sum("amount", filter=expression),
+        Value(ZERO),
+        output_field=DecimalField(max_digits=18, decimal_places=2),
+    )
 
 
 def _income() -> Coalesce:
@@ -33,7 +47,14 @@ def _expense() -> Coalesce:
     return _money_sum(Q(amount__lt=0))
 
 
-def window(transactions: QuerySet, start: date | None, end: date | None, account_ids: list[int] | None = None, include_transfers: bool = False, include_pending: bool = False) -> QuerySet:
+def window(
+    transactions: QuerySet,
+    start: date | None,
+    end: date | None,
+    account_ids: list[int] | None = None,
+    include_transfers: bool = False,
+    include_pending: bool = False,
+) -> QuerySet:
     """Narrow transactions to a booking-date window (inclusive), accounts, and stats-relevant rows."""
     qs = transactions
     if not include_pending:
@@ -45,7 +66,9 @@ def window(transactions: QuerySet, start: date | None, end: date | None, account
     if account_ids:
         qs = qs.filter(account_id__in=account_ids)
     if not include_transfers:
-        qs = qs.exclude(is_transfer=True).exclude(category__kind=models.CategoryKind.TRANSFER)
+        qs = qs.exclude(is_transfer=True).exclude(
+            category__kind=models.CategoryKind.TRANSFER
+        )
     return qs
 
 
@@ -63,8 +86,24 @@ class CategoryTotal:
 
 def spending_by_category(qs: QuerySet) -> list[CategoryTotal]:
     """Income, expense (positive) and net per category and currency, biggest expense first."""
-    rows = qs.values("category_id", "currency").annotate(income=_income(), expense=_expense(), net=_money_sum(), count=Count("id")).order_by("expense", "category_id")
-    return [CategoryTotal(r["category_id"], r["currency"], r["income"], -r["expense"], r["net"], r["count"]) for r in rows]
+    rows = (
+        qs.values("category_id", "currency")
+        .annotate(
+            income=_income(), expense=_expense(), net=_money_sum(), count=Count("id")
+        )
+        .order_by("expense", "category_id")
+    )
+    return [
+        CategoryTotal(
+            r["category_id"],
+            r["currency"],
+            r["income"],
+            -r["expense"],
+            r["net"],
+            r["count"],
+        )
+        for r in rows
+    ]
 
 
 @dataclass
@@ -81,10 +120,26 @@ class MerchantTotal:
 
 def spending_by_merchant(qs: QuerySet, limit: int | None = None) -> list[MerchantTotal]:
     """Income, expense (positive) and net per merchant and currency, biggest expense first."""
-    rows = qs.values("merchant_id", "currency").annotate(income=_income(), expense=_expense(), net=_money_sum(), count=Count("id")).order_by("expense", "merchant_id")
+    rows = (
+        qs.values("merchant_id", "currency")
+        .annotate(
+            income=_income(), expense=_expense(), net=_money_sum(), count=Count("id")
+        )
+        .order_by("expense", "merchant_id")
+    )
     if limit:
         rows = rows[:limit]
-    return [MerchantTotal(r["merchant_id"], r["currency"], r["income"], -r["expense"], r["net"], r["count"]) for r in rows]
+    return [
+        MerchantTotal(
+            r["merchant_id"],
+            r["currency"],
+            r["income"],
+            -r["expense"],
+            r["net"],
+            r["count"],
+        )
+        for r in rows
+    ]
 
 
 @dataclass
@@ -106,10 +161,17 @@ def cashflow(qs: QuerySet, granularity: str) -> list[CashflowBucket]:
         qs.exclude(booking_date=None)
         .annotate(period=trunc("booking_date"))
         .values("period", "currency")
-        .annotate(income=_income(), expense=_expense(), net=_money_sum(), count=Count("id"))
+        .annotate(
+            income=_income(), expense=_expense(), net=_money_sum(), count=Count("id")
+        )
         .order_by("period", "currency")
     )
-    return [CashflowBucket(r["period"], r["currency"], r["income"], -r["expense"], r["net"], r["count"]) for r in rows]
+    return [
+        CashflowBucket(
+            r["period"], r["currency"], r["income"], -r["expense"], r["net"], r["count"]
+        )
+        for r in rows
+    ]
 
 
 @dataclass
@@ -122,18 +184,38 @@ class CounterpartyTotal:
     count: int
 
 
-def top_counterparties(qs: QuerySet, direction: str, limit: int) -> list[CounterpartyTotal]:
+def top_counterparties(
+    qs: QuerySet, direction: str, limit: int
+) -> list[CounterpartyTotal]:
     """The counterparties with the most money out (``OUT``) or in (``IN``), largest first."""
     if direction == "IN":
         qs, order = qs.filter(amount__gt=0), "-total"
     else:
         qs, order = qs.filter(amount__lt=0), "total"
-    rows = qs.exclude(counterparty=None).values("counterparty", "currency").annotate(total=_money_sum(), count=Count("id")).order_by(order)[: max(1, min(limit, 500))]
-    return [CounterpartyTotal(r["counterparty"], r["currency"], abs(r["total"]), r["count"]) for r in rows]
+    rows = (
+        qs.exclude(counterparty=None)
+        .values("counterparty", "currency")
+        .annotate(total=_money_sum(), count=Count("id"))
+        .order_by(order)[: max(1, min(limit, 500))]
+    )
+    return [
+        CounterpartyTotal(r["counterparty"], r["currency"], abs(r["total"]), r["count"])
+        for r in rows
+    ]
 
 
 # Preferred balance types, most authoritative first (ISO 20022 codes).
-BALANCE_PREFERENCE = ["CLBD", "ITBD", "XPCD", "CLAV", "ITAV", "OPBD", "PRCD", "OTHR", "IMPT"]  # IMPT: a running balance from an imported statement
+BALANCE_PREFERENCE = [
+    "CLBD",
+    "ITBD",
+    "XPCD",
+    "CLAV",
+    "ITAV",
+    "OPBD",
+    "PRCD",
+    "OTHR",
+    "IMPT",
+]  # IMPT: a running balance from an imported statement
 
 
 def latest_balance(account: models.BankAccount) -> models.BalanceSnapshot | None:
@@ -142,7 +224,14 @@ def latest_balance(account: models.BankAccount) -> models.BalanceSnapshot | None
     if not snapshots:
         return None
     newest = [s for s in snapshots if s.date == snapshots[0].date]
-    return min(newest, key=lambda s: BALANCE_PREFERENCE.index(s.balance_type) if s.balance_type in BALANCE_PREFERENCE else len(BALANCE_PREFERENCE))
+    return min(
+        newest,
+        key=lambda s: (
+            BALANCE_PREFERENCE.index(s.balance_type)
+            if s.balance_type in BALANCE_PREFERENCE
+            else len(BALANCE_PREFERENCE)
+        ),
+    )
 
 
 @dataclass
@@ -157,9 +246,18 @@ class BalanceTotal:
 
 def balance_totals(accounts: QuerySet) -> list[BalanceTotal]:
     """Each account's :func:`latest_balance`, summed per account kind and currency (one query, however many accounts)."""
-    preference = Case(*[When(balance_type=code, then=Value(rank)) for rank, code in enumerate(BALANCE_PREFERENCE)], default=Value(len(BALANCE_PREFERENCE)), output_field=IntegerField())
+    preference = Case(
+        *[
+            When(balance_type=code, then=Value(rank))
+            for rank, code in enumerate(BALANCE_PREFERENCE)
+        ],
+        default=Value(len(BALANCE_PREFERENCE)),
+        output_field=IntegerField(),
+    )
     latest = (
-        models.BalanceSnapshot.objects.filter(account__in=accounts.order_by().values("id"))
+        models.BalanceSnapshot.objects.filter(
+            account__in=accounts.order_by().values("id")
+        )
         .annotate(_preference=preference)
         .order_by("account_id", "-date", "_preference")
         .distinct("account_id")
@@ -167,7 +265,9 @@ def balance_totals(accounts: QuerySet) -> list[BalanceTotal]:
     )
     sums: dict[tuple[str, str], BalanceTotal] = {}
     for kind, currency, amount in latest:
-        row = sums.setdefault((kind, currency), BalanceTotal(kind, currency, Decimal(0), 0))
+        row = sums.setdefault(
+            (kind, currency), BalanceTotal(kind, currency, Decimal(0), 0)
+        )
         row.amount += amount
         row.accounts += 1
     return sorted(sums.values(), key=lambda t: (t.kind, t.currency))
@@ -183,7 +283,9 @@ class BalancePoint:
     reported: bool
 
 
-def balance_history(account: models.BankAccount, start: date, end: date) -> list[BalancePoint]:
+def balance_history(
+    account: models.BankAccount, start: date, end: date
+) -> list[BalancePoint]:
     """The end-of-day balance for every day in ``[start, end]``.
 
     Anchored on the latest snapshot the bank reported and walked backwards (and forwards)
@@ -197,16 +299,25 @@ def balance_history(account: models.BankAccount, start: date, end: date) -> list
         # A depot's value moves with the market, not with transactions: only reported days are known.
         return [
             BalancePoint(s.date, s.amount, s.currency, True)
-            for s in account.balances.filter(balance_type=anchor.balance_type, date__gte=start, date__lte=end).order_by("date")
+            for s in account.balances.filter(
+                balance_type=anchor.balance_type, date__gte=start, date__lte=end
+            ).order_by("date")
         ]
     daily = dict(
-        account.transactions.filter(status=models.TransactionStatus.BOOKED, currency=anchor.currency)
+        account.transactions.filter(
+            status=models.TransactionStatus.BOOKED, currency=anchor.currency
+        )
         .exclude(booking_date=None)
         .values("booking_date")
         .annotate(total=Sum("amount"))
         .values_list("booking_date", "total")
     )
-    reported = {s.date: s.amount for s in account.balances.filter(balance_type=anchor.balance_type, date__gte=start, date__lte=end)}
+    reported = {
+        s.date: s.amount
+        for s in account.balances.filter(
+            balance_type=anchor.balance_type, date__gte=start, date__lte=end
+        )
+    }
 
     balances: dict[date, Decimal] = {anchor.date: anchor.amount}
     day, amount = anchor.date, anchor.amount

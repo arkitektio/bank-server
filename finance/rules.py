@@ -14,6 +14,7 @@ from django.db.models import QuerySet
 
 from finance import models
 
+
 def seed_default_categories(organization_id: int) -> int:
     """Create the base categories the organization does not have yet; returns how many (see :mod:`finance.taxonomy`)."""
     from finance.taxonomy import seed_base_categories
@@ -57,7 +58,11 @@ def matches(rule: models.CategoryRule, tx: models.Transaction) -> bool:
     if rule.amount_max is not None and magnitude > rule.amount_max:
         return False
     value = _field_value(rule, tx)
-    pattern = rule.pattern.replace(" ", "") if rule.field == models.RuleField.IBAN else rule.pattern
+    pattern = (
+        rule.pattern.replace(" ", "")
+        if rule.field == models.RuleField.IBAN
+        else rule.pattern
+    )
     if rule.match == models.RuleMatch.EQUALS:
         return value.casefold() == pattern.casefold()
     if rule.match == models.RuleMatch.CONTAINS:
@@ -69,10 +74,16 @@ def apply_rules(organization_id: int, transactions: QuerySet) -> int:
     """Categorize ``transactions`` by the organization's rules; returns how many rows changed."""
     from bank_server.service import service  # it imports finance.models
 
-    rules = list(models.CategoryRule.objects.filter(organization_id=organization_id, active=True).order_by("priority", "id"))
+    rules = list(
+        models.CategoryRule.objects.filter(
+            organization_id=organization_id, active=True
+        ).order_by("priority", "id")
+    )
     changed = []
     # A user's choice and an imported statement's category are never a rule's to change.
-    for tx in transactions.exclude(category_source__in=[models.CategorySource.MANUAL, models.CategorySource.IMPORT]).defer("embedding"):
+    for tx in transactions.exclude(
+        category_source__in=[models.CategorySource.MANUAL, models.CategorySource.IMPORT]
+    ).defer("embedding"):
         rule = next((rule for rule in rules if matches(rule, tx)), None)
         if rule is not None:
             category_id, source = rule.category_id, models.CategorySource.RULE
@@ -84,5 +95,9 @@ def apply_rules(organization_id: int, transactions: QuerySet) -> int:
             tx.category_id, tx.category_source = category_id, source
             changed.append(tx)
     # Whether a row is categorized is a descriptor: no pre_save sees a bulk write, so it is stamped.
-    models.Transaction.objects.bulk_update(service.stamp(changed), ["category", "category_source", "stored_descriptors"], batch_size=500)
+    models.Transaction.objects.bulk_update(
+        service.stamp(changed),
+        ["category", "category_source", "stored_descriptors"],
+        batch_size=500,
+    )
     return len(changed)

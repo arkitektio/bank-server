@@ -3,9 +3,9 @@ own (the ``@auth`` directive publishes it, a generated client gathers it), and `
 for all of them."""
 
 import pytest
+from arkitekt_service.graphql import scope_gaps
 from kante.context import HttpContext
 
-from arkitekt_service.graphql import scope_gaps
 from bank_server.schema import schema
 from tests.conftest import _context
 

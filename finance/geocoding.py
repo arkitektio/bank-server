@@ -52,15 +52,32 @@ def _conf() -> dict:
 
 def _place(hit: dict) -> Place:
     address = hit.get("address") or {}
-    street = " ".join(part for part in (address.get("road") or address.get("pedestrian"), address.get("house_number")) if part) or None
-    osm = f"{hit.get('osm_type', '')[:1].upper()}{hit['osm_id']}" if hit.get("osm_id") else None
+    street = (
+        " ".join(
+            part
+            for part in (
+                address.get("road") or address.get("pedestrian"),
+                address.get("house_number"),
+            )
+            if part
+        )
+        or None
+    )
+    osm = (
+        f"{hit.get('osm_type', '')[:1].upper()}{hit['osm_id']}"
+        if hit.get("osm_id")
+        else None
+    )
     return Place(
         label=hit.get("display_name") or "",
         latitude=Decimal(str(hit["lat"])).quantize(Decimal("0.000001")),
         longitude=Decimal(str(hit["lon"])).quantize(Decimal("0.000001")),
         street=street,
         postal_code=address.get("postcode"),
-        city=address.get("city") or address.get("town") or address.get("village") or address.get("municipality"),
+        city=address.get("city")
+        or address.get("town")
+        or address.get("village")
+        or address.get("municipality"),
         region=address.get("state"),
         country=(address.get("country_code") or "").upper() or None,
         osm_id=osm,
@@ -70,18 +87,37 @@ def _place(hit: dict) -> Place:
 async def _get(path: str, params: dict) -> list[dict] | dict:
     conf = _conf()
     url = conf["url"].rstrip("/") + path
-    headers = {"User-Agent": conf["user_agent"], "Accept-Language": conf.get("language", "de,en")}
+    headers = {
+        "User-Agent": conf["user_agent"],
+        "Accept-Language": conf.get("language", "de,en"),
+    }
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=conf.get("timeout_seconds", 10))) as http:
-            async with http.get(url, params={**params, "format": "jsonv2", "addressdetails": "1"}, headers=headers) as response:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=conf.get("timeout_seconds", 10))
+        ) as http:
+            async with http.get(
+                url,
+                params={**params, "format": "jsonv2", "addressdetails": "1"},
+                headers=headers,
+            ) as response:
                 if response.status >= 400:
-                    raise GeocodingError(f"Geocoder answered HTTP {response.status}.", response.status)
+                    raise GeocodingError(
+                        f"Geocoder answered HTTP {response.status}.", response.status
+                    )
                 return await response.json(content_type=None)
     except aiohttp.ClientError as error:
         raise GeocodingError(f"Geocoder unreachable: {error}") from error
 
 
-async def search(query: str | None = None, *, street: str | None = None, postal_code: str | None = None, city: str | None = None, country: str | None = None, limit: int = 5) -> list[Place]:
+async def search(
+    query: str | None = None,
+    *,
+    street: str | None = None,
+    postal_code: str | None = None,
+    city: str | None = None,
+    country: str | None = None,
+    limit: int = 5,
+) -> list[Place]:
     """Places matching a free-text query or a structured address, best first."""
     conf = _conf()
     params: dict = {"limit": str(max(1, min(limit, 20)))}
@@ -90,7 +126,18 @@ async def search(query: str | None = None, *, street: str | None = None, postal_
     if query:
         params["q"] = query
     else:
-        params.update({k: v for k, v in (("street", street), ("postalcode", postal_code), ("city", city), ("country", country)) if v})
+        params.update(
+            {
+                k: v
+                for k, v in (
+                    ("street", street),
+                    ("postalcode", postal_code),
+                    ("city", city),
+                    ("country", country),
+                )
+                if v
+            }
+        )
         if len(params) <= 2:
             return []
     hits = await _get("/search", params)

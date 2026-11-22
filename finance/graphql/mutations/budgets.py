@@ -2,7 +2,6 @@
 
 import datetime
 from decimal import Decimal
-from typing import Optional
 
 import strawberry
 from kante.errors import ValidationError
@@ -30,17 +29,22 @@ class CreateBudgetInput:
     category: strawberry.ID
     amount: Decimal = strawberry.field(description="The monthly limit, positive.")
     currency: str = "EUR"
-    start_month: Optional[datetime.date] = strawberry.field(default=None, description="Any day of the first month; the current month by default.")
-    end_month: Optional[datetime.date] = strawberry.field(default=None, description="Any day of the last month; open-ended by default.")
+    start_month: datetime.date | None = strawberry.field(
+        default=None,
+        description="Any day of the first month; the current month by default.",
+    )
+    end_month: datetime.date | None = strawberry.field(
+        default=None, description="Any day of the last month; open-ended by default."
+    )
 
 
 @strawberry.input(description="Changes to a budget; omitted fields stay as they are.")
 class UpdateBudgetInput:
     id: strawberry.ID
-    amount: Optional[Decimal] = strawberry.UNSET
-    currency: Optional[str] = strawberry.UNSET
-    start_month: Optional[datetime.date] = strawberry.UNSET
-    end_month: Optional[datetime.date] = strawberry.UNSET
+    amount: Decimal | None = strawberry.UNSET
+    currency: str | None = strawberry.UNSET
+    start_month: datetime.date | None = strawberry.UNSET
+    end_month: datetime.date | None = strawberry.UNSET
 
 
 def _check(budget: models.Budget) -> models.Budget:
@@ -90,11 +94,22 @@ def delete_budget(info: Info, id: strawberry.ID) -> strawberry.ID:
     return id
 
 
-def detect_recurring(info: Info, accounts: Optional[list[strawberry.ID]] = None) -> list[types.RecurringPayment]:
+def detect_recurring(
+    info: Info, accounts: list[strawberry.ID] | None = None
+) -> list[types.RecurringPayment]:
     """(Re-)detect recurring payments in the accounts' history (all accounts by default). Ignored ones stay ignored."""
-    selected = get_many(models.BankAccount, info, accounts) if accounts else list(for_org(models.BankAccount, info))
+    selected = (
+        get_many(models.BankAccount, info, accounts)
+        if accounts
+        else list(for_org(models.BankAccount, info))
+    )
     recurring.detect(selected)
-    return list(for_org(models.RecurringPayment, info).filter(account__in=selected).exclude(status=models.RecurringStatus.IGNORED).order_by("next_expected"))  # type: ignore[return-value]
+    return list(
+        for_org(models.RecurringPayment, info)
+        .filter(account__in=selected)
+        .exclude(status=models.RecurringStatus.IGNORED)
+        .order_by("next_expected")
+    )  # type: ignore[return-value]
 
 
 @strawberry.input(description="Confirm or ignore a detected recurring payment.")
@@ -103,7 +118,9 @@ class SetRecurringStatusInput:
     status: enums.RecurringStatus
 
 
-def set_recurring_status(info: Info, input: SetRecurringStatusInput) -> types.RecurringPayment:
+def set_recurring_status(
+    info: Info, input: SetRecurringStatusInput
+) -> types.RecurringPayment:
     """Confirm a recurring payment (it then feeds forecasts) or ignore it (it is never proposed again)."""
     pattern = get_or_404(models.RecurringPayment, info, input.id)
     pattern.status = input.status.value
@@ -111,10 +128,14 @@ def set_recurring_status(info: Info, input: SetRecurringStatusInput) -> types.Re
     return pattern  # type: ignore[return-value]
 
 
-def set_recurring_statuses(info: Info, ids: list[strawberry.ID], status: enums.RecurringStatus) -> list[types.RecurringPayment]:
+def set_recurring_statuses(
+    info: Info, ids: list[strawberry.ID], status: enums.RecurringStatus
+) -> list[types.RecurringPayment]:
     """Confirm or ignore many recurring payments in one request."""
     patterns = {str(p.id): p for p in get_many(models.RecurringPayment, info, ids)}
     for pattern in patterns.values():
         pattern.status = status.value
-        pattern.save(update_fields=["status", "updated_at"])  # save(), not update(): keeps the provenance history
+        pattern.save(
+            update_fields=["status", "updated_at"]
+        )  # save(), not update(): keeps the provenance history
     return [patterns[str(i)] for i in dict.fromkeys(str(i) for i in ids)]  # type: ignore[misc]

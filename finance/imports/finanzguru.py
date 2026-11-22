@@ -151,12 +151,23 @@ def _decimal(value: Any, what: str) -> Decimal | None:  # noqa: ANN401
         return None
     if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
         return Decimal(str(value)).quantize(Decimal("0.01"))
-    text = str(value).strip().replace(" ", "").replace(" ", "").replace("€", "").replace("EUR", "")
+    text = (
+        str(value)
+        .strip()
+        .replace(" ", "")
+        .replace(" ", "")
+        .replace("€", "")
+        .replace("EUR", "")
+    )
     if not text:
         return None
     if "," in text and "." in text:
         # The later separator is the decimal one: 1.234,56 (German) or 1,234.56.
-        text = text.replace(".", "").replace(",", ".") if text.rfind(",") > text.rfind(".") else text.replace(",", "")
+        text = (
+            text.replace(".", "").replace(",", ".")
+            if text.rfind(",") > text.rfind(".")
+            else text.replace(",", "")
+        )
     elif "," in text:
         text = text.replace(",", ".")
     elif _THOUSANDS_ONLY.match(text):
@@ -174,7 +185,13 @@ def _date(value: Any, what: str) -> date:  # noqa: ANN401
         return value
     text = _text(value)
     if text:
-        for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d.%m.%y", "%d/%m/%Y", "%Y-%m-%dT%H:%M:%S"):
+        for fmt in (
+            "%d.%m.%Y",
+            "%Y-%m-%d",
+            "%d.%m.%y",
+            "%d/%m/%Y",
+            "%Y-%m-%dT%H:%M:%S",
+        ):
             try:
                 return datetime.strptime(text[:19] if "T" in text else text, fmt).date()
             except ValueError:
@@ -205,11 +222,15 @@ def _table(content: bytes) -> list[list[Any]]:
         from openpyxl import load_workbook
 
         try:
-            workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            workbook = load_workbook(
+                io.BytesIO(content), read_only=True, data_only=True
+            )
         except Exception as error:
             raise ExportError(f"Not a readable xlsx workbook: {error}") from error
         try:
-            return [list(row) for row in workbook.worksheets[0].iter_rows(values_only=True)]
+            return [
+                list(row) for row in workbook.worksheets[0].iter_rows(values_only=True)
+            ]
         finally:
             workbook.close()
     for encoding in ("utf-8-sig", "cp1252"):
@@ -231,7 +252,9 @@ def _header(rows: list[list[Any]]) -> tuple[int, dict[str, int]]:
         names = {(_text(cell) or ""): position for position, cell in enumerate(row)}
         if all(name in names for name in REQUIRED):
             return index, names
-    raise ExportError(f"No Finanzguru header found: the columns {', '.join(REQUIRED)} are required.")
+    raise ExportError(
+        f"No Finanzguru header found: the columns {', '.join(REQUIRED)} are required."
+    )
 
 
 def parse(content: bytes) -> ParsedExport:
@@ -242,7 +265,9 @@ def parse(content: bytes) -> ParsedExport:
     unknown = sorted(set(columns) - set(COLUMNS) - {""})
     missing = [name for name in COLUMNS if name not in columns]
     if unknown:
-        warnings.append(f"Columns this importer does not know were kept in import_raw: {', '.join(unknown)}.")
+        warnings.append(
+            f"Columns this importer does not know were kept in import_raw: {', '.join(unknown)}."
+        )
     if missing:
         warnings.append(f"Columns missing from the file: {', '.join(missing)}.")
 
@@ -260,14 +285,22 @@ def parse(content: bytes) -> ParsedExport:
         reference = _text(cell(raw, "Referenzkonto"))
         amount = _decimal(cell(raw, "Betrag"), f"{where}, Betrag")
         if not booking_id or not reference or amount is None:
-            warnings.append(f"{where}: skipped (no Buchungs-ID, Referenzkonto or Betrag).")
+            warnings.append(
+                f"{where}: skipped (no Buchungs-ID, Referenzkonto or Betrag)."
+            )
             continue
         if booking_id in seen:
-            warnings.append(f"{where}: Buchungs-ID {booking_id} appears twice; the second is skipped.")
+            warnings.append(
+                f"{where}: Buchungs-ID {booking_id} appears twice; the second is skipped."
+            )
             continue
         seen.add(booking_id)
         party_iban = _text(cell(raw, "IBAN Beguenstigter/Auftraggeber"))
-        extra = {key: _json_safe(value) for name, key in EXTRA.items() if (value := cell(raw, name)) not in (None, "")}
+        extra = {
+            key: _json_safe(value)
+            for name, key in EXTRA.items()
+            if (value := cell(raw, name)) not in (None, "")
+        }
         if party_iban and not is_iban(party_iban):
             extra["counterparty_account"] = party_iban
         for name in unknown:
@@ -284,7 +317,9 @@ def parse(content: bytes) -> ParsedExport:
                 currency=(_text(cell(raw, "Waehrung")) or "EUR").upper()[:3],
                 balance=_decimal(cell(raw, "Kontostand"), f"{where}, Kontostand"),
                 counterparty=_text(cell(raw, "Beguenstigter/Auftraggeber")),
-                counterparty_iban=normalize_iban(party_iban) if is_iban(party_iban) else None,
+                counterparty_iban=normalize_iban(party_iban)
+                if is_iban(party_iban)
+                else None,
                 remittance=_text(cell(raw, "Verwendungszweck")),
                 main=_text(cell(raw, "Analyse-Hauptkategorie")) or "",
                 sub=_text(cell(raw, "Analyse-Unterkategorie")) or "",
@@ -300,7 +335,14 @@ def parse(content: bytes) -> ParsedExport:
 
 
 def _split_part(row: FgRow) -> dict[str, Any]:
-    return {"booking_id": row.booking_id, "amount": str(row.amount), "main": row.main, "sub": row.sub, "note": row.note, "remittance": row.remittance}
+    return {
+        "booking_id": row.booking_id,
+        "amount": str(row.amount),
+        "main": row.main,
+        "sub": row.sub,
+        "note": row.note,
+        "remittance": row.remittance,
+    }
 
 
 def fold_splits(rows: list[FgRow], warnings: list[str]) -> tuple[list[FgRow], int]:
@@ -326,15 +368,27 @@ def fold_splits(rows: list[FgRow], warnings: list[str]) -> tuple[list[FgRow], in
             continue
         # Only the parts are in the file: they are one booking, under the original's id.
         first = group[0]
-        merged = FgRow(**{**first.__dict__, "booking_id": original_id, "original_id": None, "amount": sum((p.amount for p in group), Decimal("0")), "extra": dict(first.extra)})
+        merged = FgRow(
+            **{
+                **first.__dict__,
+                "booking_id": original_id,
+                "original_id": None,
+                "amount": sum((p.amount for p in group), Decimal("0")),
+                "extra": dict(first.extra),
+            }
+        )
         out.append(_with_parts(merged, group, warnings, check_total=False))
     return out, sum(len(group) for group in parts.values())
 
 
-def _with_parts(row: FgRow, group: list[FgRow], warnings: list[str], check_total: bool = True) -> FgRow:
+def _with_parts(
+    row: FgRow, group: list[FgRow], warnings: list[str], check_total: bool = True
+) -> FgRow:
     total = sum((p.amount for p in group), Decimal("0"))
     if check_total and total != row.amount:
-        warnings.append(f"Buchungs-ID {row.booking_id}: its split parts sum to {total}, not {row.amount}; the booking keeps {row.amount}.")
+        warnings.append(
+            f"Buchungs-ID {row.booking_id}: its split parts sum to {total}, not {row.amount}; the booking keeps {row.amount}."
+        )
     categories = {(p.main, p.sub) for p in group if p.main}
     if len(categories) == 1:
         row.main, row.sub = next(iter(categories))

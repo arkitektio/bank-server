@@ -13,16 +13,14 @@ import strawberry_django
 from django.db.models import F, Max, Q, QuerySet
 from django.utils import timezone
 from kante.types import Info
-
-from embeddings import search
-from embeddings.search import hybrid_search
 from strawberry import auto
 from strawberry.scalars import JSON
 
+from embeddings import search
+from embeddings.search import hybrid_search
 from finance import enums, geo, models, semantic
 from finance.scoping import for_org
 from finance.textnorm import normalize
-
 
 # How deep `includeChildCategories` follows nested categories.
 CATEGORY_DEPTH = 5
@@ -35,7 +33,9 @@ def _ids(prefix: str, field: str, value: list[strawberry.ID]) -> Q:
 # --- descriptors: a port's requires ------------------------------------------
 
 
-@strawberry.enum(description="How a descriptor constraint compares the object's value with the stated one. The operators a rekuest port's `requires` is written in, with the same meaning.")
+@strawberry.enum(
+    description="How a descriptor constraint compares the object's value with the stated one. The operators a rekuest port's `requires` is written in, with the same meaning."
+)
 class DescriptorOperator(str, Enum):
     """The comparison of one constraint."""
 
@@ -59,9 +59,16 @@ class DescriptorOperator(str, Enum):
 class DescriptorConstraintInput:
     """One ``{key, operator, value}`` constraint."""
 
-    key: str = strawberry.field(description="The descriptor key, e.g. `@bank/direction`")
-    operator: DescriptorOperator = strawberry.field(description="How the object's value is compared with `value`. MATCHES is equality, as EQUALS is")
-    value: JSON | None = strawberry.field(default=None, description="The value compared against: a number for GTE and LTE, a list for IN and NOT_IN, true or false for EXISTS, the member looked for with CONTAINS")
+    key: str = strawberry.field(
+        description="The descriptor key, e.g. `@bank/direction`"
+    )
+    operator: DescriptorOperator = strawberry.field(
+        description="How the object's value is compared with `value`. MATCHES is equality, as EQUALS is"
+    )
+    value: JSON | None = strawberry.field(
+        default=None,
+        description="The value compared against: a number for GTE and LTE, a list for IN and NOT_IN, true or false for EXISTS, the member looked for with CONTAINS",
+    )
 
 
 REQUIRES_DESCRIPTION = "Filter to the objects satisfying every one of these descriptor constraints: the `requires` of a port, handed on unchanged, so a picker offers what the port accepts. Answered from the stored descriptors, in one indexed query"
@@ -100,7 +107,12 @@ class BankConnectionFilter:
     @strawberry_django.filter_field
     def needs_reauth(self, value: bool, prefix: str) -> Q:
         """Only connections whose consent ran out or was withdrawn (true), or only the others (false): the same as `needsReauth`."""
-        q = Q(**{f"{prefix}status": models.ConnectionStatus.EXPIRED}) | Q(**{f"{prefix}status": models.ConnectionStatus.ACTIVE, f"{prefix}valid_until__lte": timezone.now()})
+        q = Q(**{f"{prefix}status": models.ConnectionStatus.EXPIRED}) | Q(
+            **{
+                f"{prefix}status": models.ConnectionStatus.ACTIVE,
+                f"{prefix}valid_until__lte": timezone.now(),
+            }
+        )
         return q if value else ~q
 
 
@@ -154,7 +166,9 @@ class BankAccountFilter:
     @strawberry_django.filter_field
     def search(self, value: str, prefix: str) -> Q:
         """Case-insensitive match on name or IBAN."""
-        return Q(**{f"{prefix}name__icontains": value}) | Q(**{f"{prefix}iban__icontains": value.replace(" ", "")})
+        return Q(**{f"{prefix}name__icontains": value}) | Q(
+            **{f"{prefix}iban__icontains": value.replace(" ", "")}
+        )
 
 
 @strawberry_django.order_type(models.Transaction)
@@ -166,7 +180,9 @@ class TransactionOrder:
     created_at: auto
 
 
-@strawberry.input(description="A map viewport: the WGS84 box between south/north latitudes and west/east longitudes.")
+@strawberry.input(
+    description="A map viewport: the WGS84 box between south/north latitudes and west/east longitudes."
+)
 class BoundsInput:
     south: float
     west: float
@@ -174,11 +190,15 @@ class BoundsInput:
     east: float
 
 
-@strawberry.input(description="A circle on the map: WGS84 latitude/longitude and a radius in meters.")
+@strawberry.input(
+    description="A circle on the map: WGS84 latitude/longitude and a radius in meters."
+)
 class NearInput:
     latitude: float
     longitude: float
-    radius_meters: float = strawberry.field(default=1000.0, description="Radius in meters (default 1 km).")
+    radius_meters: float = strawberry.field(
+        default=1000.0, description="Radius in meters (default 1 km)."
+    )
 
 
 @strawberry_django.filter_type(models.Transaction)
@@ -254,30 +274,61 @@ class TransactionFilter:
     @strawberry_django.filter_field
     def direction(self, value: enums.Direction, prefix: str) -> Q:
         """Only money in, or only money out."""
-        return Q(**{f"{prefix}amount__gt" if value == enums.Direction.IN else f"{prefix}amount__lt": 0})
+        return Q(
+            **{
+                f"{prefix}amount__gt"
+                if value == enums.Direction.IN
+                else f"{prefix}amount__lt": 0
+            }
+        )
 
-    @strawberry_django.filter_field(description="Search by text: a case-insensitive substring of counterparty, remittance or note; semantic similarity to them; or a category whose terms mean the text (\"supermarket\" finds what is in Groceries). Substring matches rank first, then by similarity; an explicit `ordering` replaces that ranking.")
-    def search(self, info: Info, queryset: QuerySet, value: str, prefix: str) -> tuple[QuerySet, Q]:
-        lexical = Q(**{f"{prefix}counterparty__icontains": value}) | Q(**{f"{prefix}remittance__icontains": value}) | Q(**{f"{prefix}note__icontains": value})
-        queryset, predicate = hybrid_search(queryset, prefix, normalize(value) or value, lexical)
+    @strawberry_django.filter_field(
+        description='Search by text: a case-insensitive substring of counterparty, remittance or note; semantic similarity to them; or a category whose terms mean the text ("supermarket" finds what is in Groceries). Substring matches rank first, then by similarity; an explicit `ordering` replaces that ranking.'
+    )
+    def search(
+        self, info: Info, queryset: QuerySet, value: str, prefix: str
+    ) -> tuple[QuerySet, Q]:
+        lexical = (
+            Q(**{f"{prefix}counterparty__icontains": value})
+            | Q(**{f"{prefix}remittance__icontains": value})
+            | Q(**{f"{prefix}note__icontains": value})
+        )
+        queryset, predicate = hybrid_search(
+            queryset, prefix, normalize(value) or value, lexical
+        )
         # A concept ("supermarket") also means the categories whose terms say it. Only when no
         # line contains the text: a merchant query ("spar") must not widen to its whole category.
         if not prefix and not queryset.filter(lexical).exists():
-            categories = semantic.categories_matching(info.context.request.organization.id, value)
+            categories = semantic.categories_matching(
+                info.context.request.organization.id, value
+            )
             if categories:
                 predicate |= Q(category_id__in=categories)
         return queryset, predicate
 
-    @strawberry_django.filter_field(description="Order by similarity to the given transaction, nearest first (no cut-off, composes with other filters and pagination). Empty when it is not in this organization or has no embedding yet.")
-    def similar_to(self, info: Info, queryset: QuerySet, value: strawberry.ID, prefix: str) -> tuple[QuerySet, Q]:
+    @strawberry_django.filter_field(
+        description="Order by similarity to the given transaction, nearest first (no cut-off, composes with other filters and pagination). Empty when it is not in this organization or has no embedding yet."
+    )
+    def similar_to(
+        self, info: Info, queryset: QuerySet, value: strawberry.ID, prefix: str
+    ) -> tuple[QuerySet, Q]:
         if prefix:
             return queryset, Q()
         # The anchor through for_org: another organization's vector must not steer this query.
-        anchor = for_org(models.Transaction, info).filter(pk=value).values_list("embedding", flat=True).first()
+        anchor = (
+            for_org(models.Transaction, info)
+            .filter(pk=value)
+            .values_list("embedding", flat=True)
+            .first()
+        )
         return search.neighbourhood(queryset, anchor, exclude_pk=value)
 
-    @strawberry_django.filter_field(description="Keep transactions that look like they belong to this category — close to what the organization put there, or to one of its terms — closest first.")
-    def near_category(self, info: Info, queryset: QuerySet, value: strawberry.ID, prefix: str) -> tuple[QuerySet, Q]:
+    @strawberry_django.filter_field(
+        description="Keep transactions that look like they belong to this category — close to what the organization put there, or to one of its terms — closest first."
+    )
+    def near_category(
+        self, info: Info, queryset: QuerySet, value: strawberry.ID, prefix: str
+    ) -> tuple[QuerySet, Q]:
         category = for_org(models.Category, info).filter(pk=value).first()
         if category is None:
             return queryset, Q(pk__in=[])
@@ -298,10 +349,22 @@ class TransactionFilter:
         """Only transactions whose merchant was set this way (NONE: no merchant yet)."""
         return Q(**{f"{prefix}merchant_source": value.value})
 
-    @strawberry_django.filter_field(description="Only transactions at a merchant location within `radiusMeters` of a point, nearest first.")
-    def near(self, info: Info, queryset: QuerySet, value: NearInput, prefix: str) -> tuple[QuerySet, Q]:
-        annotations, where = geo.near(prefix, "merchant_location__point", value.latitude, value.longitude, value.radius_meters)
-        return queryset.annotate(**annotations).order_by("_distance_meters", "pk"), Q(**where)
+    @strawberry_django.filter_field(
+        description="Only transactions at a merchant location within `radiusMeters` of a point, nearest first."
+    )
+    def near(
+        self, info: Info, queryset: QuerySet, value: NearInput, prefix: str
+    ) -> tuple[QuerySet, Q]:
+        annotations, where = geo.near(
+            prefix,
+            "merchant_location__point",
+            value.latitude,
+            value.longitude,
+            value.radius_meters,
+        )
+        return queryset.annotate(**annotations).order_by("_distance_meters", "pk"), Q(
+            **where
+        )
 
     @strawberry_django.filter_field
     def category_source(self, value: enums.CategorySource, prefix: str) -> Q:
@@ -342,9 +405,15 @@ class CategoryFilter:
         """Only categories of this kind."""
         return Q(**{f"{prefix}kind": value.value})
 
-    @strawberry_django.filter_field(description="Search by text: a substring of name or description, or semantic similarity to both.")
-    def search(self, info: Info, queryset: QuerySet, value: str, prefix: str) -> tuple[QuerySet, Q]:
-        lexical = Q(**{f"{prefix}name__icontains": value}) | Q(**{f"{prefix}description__icontains": value})
+    @strawberry_django.filter_field(
+        description="Search by text: a substring of name or description, or semantic similarity to both."
+    )
+    def search(
+        self, info: Info, queryset: QuerySet, value: str, prefix: str
+    ) -> tuple[QuerySet, Q]:
+        lexical = Q(**{f"{prefix}name__icontains": value}) | Q(
+            **{f"{prefix}description__icontains": value}
+        )
         return hybrid_search(queryset, prefix, value, lexical)
 
     @strawberry_django.filter_field
@@ -390,7 +459,10 @@ class BudgetFilter:
     def active_in(self, value: datetime.date, prefix: str) -> Q:
         """Only budgets that apply in this day's month."""
         first = value.replace(day=1)
-        return Q(**{f"{prefix}start_month__lte": first}) & (Q(**{f"{prefix}end_month__isnull": True}) | Q(**{f"{prefix}end_month__gte": first}))
+        return Q(**{f"{prefix}start_month__lte": first}) & (
+            Q(**{f"{prefix}end_month__isnull": True})
+            | Q(**{f"{prefix}end_month__gte": first})
+        )
 
 
 @strawberry_django.filter_type(models.RecurringPayment)
@@ -422,9 +494,17 @@ class BankAccountOrder:
     created_at: auto
 
     @strawberry_django.order_field
-    def last_synced_at(self, queryset: QuerySet, info: Info, value: strawberry_django.Ordering, prefix: str) -> tuple[QuerySet, list]:
+    def last_synced_at(
+        self,
+        queryset: QuerySet,
+        info: Info,
+        value: strawberry_django.Ordering,
+        prefix: str,
+    ) -> tuple[QuerySet, list]:
         """By the newest successful sync of any of the account's syncers."""
-        return queryset.annotate(_last_synced_at=Max(f"{prefix}syncers__last_synced_at")), [value.resolve("_last_synced_at")]
+        return queryset.annotate(
+            _last_synced_at=Max(f"{prefix}syncers__last_synced_at")
+        ), [value.resolve("_last_synced_at")]
 
 
 @strawberry_django.order_type(models.Category)
@@ -468,9 +548,17 @@ class MerchantFilter:
         """Only these merchants."""
         return _ids(prefix, "id", value)
 
-    @strawberry_django.filter_field(description="Search by text: a substring of name, description or an alias, or semantic similarity to name and description.")
-    def search(self, info: Info, queryset: QuerySet, value: str, prefix: str) -> tuple[QuerySet, Q]:
-        lexical = Q(**{f"{prefix}name__icontains": value}) | Q(**{f"{prefix}description__icontains": value}) | Q(**{f"{prefix}aliases__pattern__icontains": (normalize(value) or value)})
+    @strawberry_django.filter_field(
+        description="Search by text: a substring of name, description or an alias, or semantic similarity to name and description."
+    )
+    def search(
+        self, info: Info, queryset: QuerySet, value: str, prefix: str
+    ) -> tuple[QuerySet, Q]:
+        lexical = (
+            Q(**{f"{prefix}name__icontains": value})
+            | Q(**{f"{prefix}description__icontains": value})
+            | Q(**{f"{prefix}aliases__pattern__icontains": (normalize(value) or value)})
+        )
         queryset, predicate = hybrid_search(queryset, prefix, value, lexical)
         return queryset.distinct() if not prefix else queryset, predicate
 
@@ -484,12 +572,18 @@ class MerchantFilter:
         """Only online-only (or only physical) merchants."""
         return Q(**{f"{prefix}online": value})
 
-    @strawberry_django.filter_field(description="Only merchants with a located store within `radiusMeters` of a point, nearest first (`distanceMeters` on each).")
-    def near(self, info: Info, queryset: QuerySet, value: NearInput, prefix: str) -> tuple[QuerySet, Q]:
+    @strawberry_django.filter_field(
+        description="Only merchants with a located store within `radiusMeters` of a point, nearest first (`distanceMeters` on each)."
+    )
+    def near(
+        self, info: Info, queryset: QuerySet, value: NearInput, prefix: str
+    ) -> tuple[QuerySet, Q]:
         if prefix:
             return queryset, Q()
         distance = geo.nearest_location_meters(value.latitude, value.longitude)
-        queryset = queryset.annotate(_distance_meters=distance).order_by(F("_distance_meters").asc(nulls_last=True), "pk")
+        queryset = queryset.annotate(_distance_meters=distance).order_by(
+            F("_distance_meters").asc(nulls_last=True), "pk"
+        )
         return queryset, Q(_distance_meters__lte=value.radius_meters)
 
 
@@ -529,16 +623,34 @@ class MerchantLocationFilter:
     @strawberry_django.filter_field
     def unlocated(self, value: bool, prefix: str) -> Q:
         """Only locations without (or with) coordinates — e.g. discovered stores still to geocode."""
-        return Q(**{f"{prefix}latitude__isnull": value}) if value else Q(**{f"{prefix}latitude__isnull": False})
+        return (
+            Q(**{f"{prefix}latitude__isnull": value})
+            if value
+            else Q(**{f"{prefix}latitude__isnull": False})
+        )
 
-    @strawberry_django.filter_field(description="Only locations within `radiusMeters` of a point, nearest first (`distanceMeters` on each).")
-    def near(self, info: Info, queryset: QuerySet, value: NearInput, prefix: str) -> tuple[QuerySet, Q]:
-        annotations, where = geo.near(prefix, "point", value.latitude, value.longitude, value.radius_meters)
-        return queryset.annotate(**annotations).order_by("_distance_meters", "pk"), Q(**where)
+    @strawberry_django.filter_field(
+        description="Only locations within `radiusMeters` of a point, nearest first (`distanceMeters` on each)."
+    )
+    def near(
+        self, info: Info, queryset: QuerySet, value: NearInput, prefix: str
+    ) -> tuple[QuerySet, Q]:
+        annotations, where = geo.near(
+            prefix, "point", value.latitude, value.longitude, value.radius_meters
+        )
+        return queryset.annotate(**annotations).order_by("_distance_meters", "pk"), Q(
+            **where
+        )
 
-    @strawberry_django.filter_field(description="Only located places inside a map viewport.")
-    def within(self, info: Info, queryset: QuerySet, value: BoundsInput, prefix: str) -> tuple[QuerySet, Q]:
-        annotations, where = geo.within(prefix, "point", value.south, value.west, value.north, value.east)
+    @strawberry_django.filter_field(
+        description="Only located places inside a map viewport."
+    )
+    def within(
+        self, info: Info, queryset: QuerySet, value: BoundsInput, prefix: str
+    ) -> tuple[QuerySet, Q]:
+        annotations, where = geo.within(
+            prefix, "point", value.south, value.west, value.north, value.east
+        )
         return queryset.annotate(**annotations), Q(**where)
 
     @strawberry_django.filter_field
