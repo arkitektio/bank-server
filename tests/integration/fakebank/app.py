@@ -205,20 +205,21 @@ async def delete_session(request: web.Request) -> web.Response:
     return web.json_response({"message": "OK"})
 
 
-def _account(request: web.Request) -> tuple[dict | None, web.Response | None]:
+def _account(request: web.Request) -> dict | web.Response:
+    """The account a request's ``uid`` names, or the error the API answers instead."""
     uid = request.match_info["uid"]
     session = STATE["sessions"].get(STATE["uids"].get(uid, ""))
     if session is None:
-        return None, _error(404, "ACCOUNT_DOES_NOT_EXIST")
+        return _error(404, "ACCOUNT_DOES_NOT_EXIST")
     if session["status"] != "AUTHORIZED":
-        return None, _error(401, "EXPIRED_SESSION", f"session is {session['status']}")
-    return STATE["accounts"][session["uids"][uid]], None
+        return _error(401, "EXPIRED_SESSION", f"session is {session['status']}")
+    return STATE["accounts"][session["uids"][uid]]
 
 
 async def transactions(request: web.Request) -> web.Response:
-    account, error = _account(request)
-    if error:
-        return error
+    account = _account(request)
+    if isinstance(account, web.Response):
+        return account
     if not STATE["hold"].is_set():
         STATE["held"] += 1
         try:
@@ -252,9 +253,9 @@ async def transactions(request: web.Request) -> web.Response:
 
 
 async def balances(request: web.Request) -> web.Response:
-    account, error = _account(request)
-    if error:
-        return error
+    account = _account(request)
+    if isinstance(account, web.Response):
+        return account
     if account.get("empty_answers"):
         return web.Response(status=200)
     return web.json_response({"balances": account["balances"]})
