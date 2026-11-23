@@ -353,10 +353,13 @@ class FakeBank:
         transactions: list[dict] | None = None,
         balances: list[dict] | None = None,
         rate_limited: bool | None = None,
+        empty_answers: bool | None = None,
     ) -> None:
         body: dict = {}
         if rate_limited is not None:
             body["rate_limited"] = rate_limited
+        if empty_answers is not None:
+            body["empty_answers"] = empty_answers
         if transactions is not None:
             body["transactions"] = transactions
         if balances is not None:

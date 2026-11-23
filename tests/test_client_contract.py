@@ -134,6 +134,45 @@ async def test_expired_consent_is_coded_on_account_and_connection(
     }
 
 
+async def test_an_empty_bank_answer_is_coded_not_a_crash(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
+    ident = "empty-" + fakebank.aspsp.replace(" ", "-")
+    fakebank.scenario([account(ident)])
+    connection = await link()
+    acc = connection["accounts"][0]["id"]
+    fakebank.set_account(ident, empty_answers=True)
+
+    failed = await aexecute(SYNC, {"id": acc}, allow_errors=True)
+    state = (await aexecute(BUDGET, {"a": acc, "c": connection["id"]})).data[
+        "bankAccount"
+    ]
+
+    assert extensions_of(failed)["code"] == "BANK_UNAVAILABLE"
+    assert state["lastErrorCode"] == "BANK_UNAVAILABLE"
+    assert "without the JSON object it must return" in state["lastError"]
+
+
+async def test_an_empty_answer_to_withdrawing_a_consent_is_a_success(
+    link: Link, aexecute: AExecute, fakebank: FakeBank
+) -> None:
+    ident = "empty-revoke-" + fakebank.aspsp.replace(" ", "-")
+    fakebank.scenario([account(ident)])
+    connection = await link()
+    fakebank.set_account(ident, empty_answers=True)
+    seen = len(fakebank.log())
+
+    revoked = (
+        await aexecute(
+            "mutation($id: ID!) { revokeBankConnection(id: $id) { status lastError } }",
+            {"id": connection["id"]},
+        )
+    ).data["revokeBankConnection"]
+
+    assert revoked == {"status": "REVOKED", "lastError": None}
+    assert [e["method"] for e in fakebank.log()[seen:]] == ["DELETE"]
+
+
 # --- §5 bulk mutations -----------------------------------------------------------------------
 
 

@@ -10,6 +10,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import date
+from json import loads as _json_loads
 from typing import Any
 
 import aiohttp
@@ -29,8 +30,12 @@ _TOKEN_MARGIN = 300
 class EnableBankingError(ProviderError):
     """Enable Banking refused a request."""
 
-    def __init__(self, status: int, body: str, path: str) -> None:
-        super().__init__(f"Enable Banking {path} failed ({status}): {body[:500]}")
+    def __init__(
+        self, status: int, body: str, path: str, message: str | None = None
+    ) -> None:
+        super().__init__(
+            message or f"Enable Banking {path} failed ({status}): {body[:500]}"
+        )
         self.status = status
         self.body = body
         self.path = path
@@ -46,6 +51,26 @@ class RateLimited(EnableBankingError):
     """The bank or Enable Banking throttled us (PSD2 access limits); try later."""
 
     explicit_code = BankErrorCode.RATE_LIMITED
+
+
+class EmptyAnswer(EnableBankingError):
+    """A request that must answer with a JSON object answered success without one.
+
+    The provider failed, as with a 5xx: nothing was refused, so a later attempt may work.
+    """
+
+    explicit_code = BankErrorCode.BANK_UNAVAILABLE
+
+    def __init__(self, status: int, body: str, path: str) -> None:
+        super().__init__(
+            status,
+            body,
+            path,
+            message=(
+                f"Enable Banking answered {path} ({status}) without the JSON object it "
+                f"must return: {body[:500] or 'an empty body'}"
+            ),
+        )
 
 
 @dataclass
@@ -126,7 +151,7 @@ class EnableBankingClient:
             self._token_exp = iat + _TOKEN_TTL
         return {"Authorization": f"Bearer {self._token}"}
 
-    async def _request(
+    async def _send(
         self,
         method: str,
         path: str,
@@ -134,7 +159,8 @@ class EnableBankingClient:
         json: dict | None = None,
         params: dict | None = None,
         psu_headers: dict[str, str] | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> tuple[int, str]:
+        """Send a request; returns the status and body of a success, raises for anything else."""
         assert self._session is not None, (
             "use `async with EnableBankingClient(config) as client`"
         )
@@ -145,7 +171,7 @@ class EnableBankingClient:
         ) as response:
             body = await response.text()
             if response.status < 400:
-                return await response.json(content_type=None) if body else None
+                return response.status, body
         if response.status == 429:
             raise RateLimited(response.status, body, path)
         if response.status in (401, 403, 404, 410, 422) and any(
@@ -153,6 +179,30 @@ class EnableBankingClient:
         ):
             raise ConsentExpired(response.status, body, path)
         raise EnableBankingError(response.status, body, path)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict | None = None,
+        params: dict | None = None,
+        psu_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Send a request whose answer is a JSON object, and return it.
+
+        ``Any`` for the values: they are JSON, as the API documents them per endpoint.
+        """
+        status, body = await self._send(
+            method, path, json=json, params=params, psu_headers=psu_headers
+        )
+        try:
+            data = _json_loads(body) if body else None
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            raise EmptyAnswer(status, body, path)
+        return data
 
     async def application(self) -> Application:
         """The application this client's key belongs to; fails when the key or app id is not Enable Banking's."""
@@ -202,8 +252,8 @@ class EnableBankingClient:
         return await self._request("GET", f"/sessions/{session_id}")
 
     async def delete_session(self, session_id: str) -> None:
-        """Withdraw the consent at the bank."""
-        await self._request("DELETE", f"/sessions/{session_id}")
+        """Withdraw the consent at the bank. Whatever a success carries is not read: an empty one is fine."""
+        await self._send("DELETE", f"/sessions/{session_id}")
 
     async def transactions(
         self,

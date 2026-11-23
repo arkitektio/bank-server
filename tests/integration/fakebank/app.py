@@ -8,6 +8,7 @@ the real API does. Tests drive it through ``/_admin``:
 * ``POST /_admin/keys``            register an application's public key (``kid``, ``public_key``)
 * ``POST /_admin/scenario``        the accounts a bank (``aspsp_name``) offers, with their data
 * ``PUT  /_admin/accounts/{ident}`` replace one account's transactions / balances / ``rate_limited``
+  / ``empty_answers`` (its transactions, balances and session withdrawal succeed with no body)
 * ``POST /_admin/approve``         the user approves a consent: returns the redirect ``code``
 * ``POST /_admin/sessions/{id}/expire``  the consent runs out at the bank
 * ``POST /_admin/hold`` / ``/_admin/release``  park transaction and session requests until released
@@ -196,6 +197,11 @@ async def delete_session(request: web.Request) -> web.Response:
     if session is None:
         return _error(404, "SESSION_DOES_NOT_EXIST")
     session["status"] = "REVOKED"
+    if any(
+        STATE["accounts"][ident].get("empty_answers")
+        for ident in session["uids"].values()
+    ):
+        return web.Response(status=204)
     return web.json_response({"message": "OK"})
 
 
@@ -224,6 +230,8 @@ async def transactions(request: web.Request) -> web.Response:
         return _error(
             429, "ASPSP_RATE_LIMIT_EXCEEDED", "too many requests for this account today"
         )
+    if account.get("empty_answers"):
+        return web.Response(status=200)
     rows = account["transactions"]
     if "date_from" in request.query:
         since = request.query["date_from"]
@@ -247,6 +255,8 @@ async def balances(request: web.Request) -> web.Response:
     account, error = _account(request)
     if error:
         return error
+    if account.get("empty_answers"):
+        return web.Response(status=200)
     return web.json_response({"balances": account["balances"]})
 
 
@@ -282,7 +292,7 @@ async def admin_scenario(request: web.Request) -> web.Response:
 async def admin_account(request: web.Request) -> web.Response:
     body = await request.json()
     entry = STATE["accounts"][request.match_info["ident"]]
-    for key in ("transactions", "balances", "rate_limited"):
+    for key in ("transactions", "balances", "rate_limited", "empty_answers"):
         if key in body:
             entry[key] = body[key]
     return web.json_response({"ok": True})
