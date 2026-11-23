@@ -12,6 +12,7 @@ from typing import Any, Optional
 import kante
 import strawberry
 import strawberry_django
+from arkitekt_service.collaborations.guests import guest_of
 from django.contrib.postgres.expressions import ArraySubquery
 from django.db.models import (
     CharField,
@@ -417,11 +418,21 @@ class AccountSyncer(OrgScoped):
         )
 
 
+def _syncers(account: models.BankAccount) -> QuerySet[models.AccountSyncer]:
+    """The account's syncers; none for a guest of the organization.
+
+    How an account is pulled from its providers (their ids, raw answers, errors, leases) is the
+    organization's: a guest who reads a shared account learns nothing of it, not even computed.
+    """
+    syncers: QuerySet[models.AccountSyncer] = account.syncers.all()  # type: ignore[attr-defined]
+    return syncers.none() if guest_of() is not None else syncers
+
+
 def _live_syncers(account: models.BankAccount) -> list[models.AccountSyncer]:
     """The account's syncers whose connection is ACTIVE — the ones `syncAccount` runs."""
     return [
         s
-        for s in account.syncers.select_related("connection").order_by("id")
+        for s in _syncers(account).select_related("connection").order_by("id")
         if s.connection and s.connection.status == models.ConnectionStatus.ACTIVE
     ]
 
@@ -466,7 +477,8 @@ class BankAccount(OrgScoped):
         if live:
             return live[0].connection  # type: ignore[return-value]
         newest = (
-            self.syncers.exclude(connection=None)  # type: ignore[attr-defined]
+            _syncers(self)  # type: ignore[arg-type]
+            .exclude(connection=None)
             .select_related("connection")
             .order_by("-id")
             .first()
@@ -483,21 +495,21 @@ class BankAccount(OrgScoped):
         description="When the last successful sync of any syncer finished."
     )
     def last_synced_at(self) -> datetime.datetime | None:
-        times = [s.last_synced_at for s in self.syncers.all() if s.last_synced_at]  # type: ignore[attr-defined]
+        times = [s.last_synced_at for s in _syncers(self) if s.last_synced_at]  # type: ignore[arg-type]
         return max(times) if times else None
 
     @strawberry_django.field(
         description="Why the last sync of a syncer failed, if one did."
     )
     def last_error(self) -> str | None:
-        failed = self.syncers.exclude(last_error=None).order_by("-id").first()  # type: ignore[attr-defined]
+        failed = _syncers(self).exclude(last_error=None).order_by("-id").first()  # type: ignore[arg-type]
         return failed.last_error if failed else None
 
     @strawberry_django.field(
         description="The kind of `lastError`, for the client to offer a fix."
     )
     def last_error_code(self) -> enums.BankErrorCode | None:
-        failed = self.syncers.exclude(last_error=None).order_by("-id").first()  # type: ignore[attr-defined]
+        failed = _syncers(self).exclude(last_error=None).order_by("-id").first()  # type: ignore[arg-type]
         return (
             enums.BankErrorCode(failed.last_error_code)
             if failed and failed.last_error_code
@@ -555,7 +567,7 @@ class BankAccount(OrgScoped):
         now = timezone.now()
         return any(
             s.sync_lease_until is not None and s.sync_lease_until > now
-            for s in self.syncers.all()  # type: ignore[attr-defined]
+            for s in _syncers(self)  # type: ignore[arg-type]
         )
 
     @strawberry_django.field(

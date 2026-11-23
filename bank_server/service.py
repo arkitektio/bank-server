@@ -27,6 +27,7 @@ connection or category whose descriptors changed is announced as UPDATED, as a s
 from collections.abc import Iterable
 
 from arkitekt_service.service import Service, organization_of
+from django.db.models import Q
 
 from bank_server import descriptors
 from bank_server.contract import contract
@@ -39,23 +40,75 @@ service = Service(
 )
 
 
+# --- Collaborations: what a guest of the organization may read ---------------------------
+# A member shares an account with a guest, view only (``bank_server.schema.SHAREABLE``): what is
+# part of it (its required, cascading key) is in the collaboration with it, live: its transactions,
+# balances, holdings and recurring payments. A transaction or a recurring payment is not put in
+# alone: it goes in with its account. The categories its transactions are in, and their parents,
+# are brought along as they are when the account is put in.
+#
+# How an account is pulled from a provider is never anyone's but the organization's: its syncers
+# are not part of it (their provider ids and raw answers stay out, ``not_part_of``), and providers,
+# connections and statement imports are never put in a collaboration, by hand or by a workflow
+# (``created_under`` names none of them). Neither are merchants (each brings its aliases, places
+# and rules) nor budgets (their status is computed over every account of the organization). A
+# category's rules and budgets are not part of it.
+
+
+def _never_shared(root_task_id: str) -> Q:
+    """No object of the structure: a workflow shares none, and ``createdUnder`` lists none."""
+    return Q(pk__in=[])
+
+
+def _account_needs(account: models.BankAccount) -> list[models.Category]:
+    """The categories the account's transactions are in, and their parents: what they are shown under."""
+    ids = set(
+        models.Transaction.objects.filter(account=account, category__isnull=False)
+        .values_list("category_id", flat=True)
+        .distinct()
+    )
+    return list(models.Category.objects.filter(id__in=ids))
+
+
+def _category_needs(category: models.Category) -> list[models.Category]:
+    """The category it is nested in."""
+    parent = category.parent
+    return [parent] if parent is not None else []
+
+
+service.not_part_of(models.AccountSyncer, "account")
+service.not_part_of(models.CategoryRule, "category")
+service.not_part_of(models.Budget, "category")
+
+
 # --- Structures: what bank hosts ------------------------------------------------------
+# What a workflow (a root task) created, for ``shareWorkflow`` and the ``createdUnder`` filters,
+# koherent reads off the CREATE row of a category's and a recurring payment's history. Accounts and
+# transactions are synced from a bank or imported and record no task: they are reported unknown.
 
 bankconnection = service.structure(
     models.BankConnection,
     "@bank/bankconnection",
     describe=descriptors.connection_descriptors,
+    created_under=_never_shared,
 )
 bankprovider = service.structure(
-    models.BankProvider, "@bank/bankprovider", describe=descriptors.provider_descriptors
+    models.BankProvider,
+    "@bank/bankprovider",
+    describe=descriptors.provider_descriptors,
+    created_under=_never_shared,
 )
 bank_account = service.structure(
-    models.BankAccount, "@bank/bankaccount", describe=descriptors.account_descriptors
+    models.BankAccount,
+    "@bank/bankaccount",
+    describe=descriptors.account_descriptors,
+    depends=_account_needs,
 )
 statementimport = service.structure(
     models.StatementImport,
     "@bank/statementimport",
     describe=descriptors.import_descriptors,
+    created_under=_never_shared,
 )
 recurringpayment = service.structure(
     models.RecurringPayment,
@@ -63,13 +116,22 @@ recurringpayment = service.structure(
     describe=descriptors.recurring_descriptors,
 )
 category = service.structure(
-    models.Category, "@bank/category", describe=descriptors.category_descriptors
+    models.Category,
+    "@bank/category",
+    describe=descriptors.category_descriptors,
+    depends=_category_needs,
 )
 merchant = service.structure(
-    models.Merchant, "@bank/merchant", describe=descriptors.merchant_descriptors
+    models.Merchant,
+    "@bank/merchant",
+    describe=descriptors.merchant_descriptors,
+    created_under=_never_shared,
 )
 budget = service.structure(
-    models.Budget, "@bank/budget", describe=descriptors.budget_descriptors
+    models.Budget,
+    "@bank/budget",
+    describe=descriptors.budget_descriptors,
+    created_under=_never_shared,
 )
 transaction = service.structure(
     models.Transaction,

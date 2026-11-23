@@ -61,6 +61,8 @@ INSTALLED_APPS = [
     "finance",
     "health_check",  # required for health checks
     "health_check.db",  # stock Django health checkers
+    # Collaborations bank's accounts are shared in, which a guest of the organization is granted and held to.
+    "arkitekt_service.collaborations",
     # What every service is as a Django server: `ensureadmin`, `validate_settings`, and the
     # check that warns about config keys this release does not read. Last, so that a command
     # of the service's own with the same name is the one that runs.

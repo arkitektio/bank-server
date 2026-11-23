@@ -18,6 +18,7 @@ the RS256 application JWT. Nothing in the service is mocked.
   file the way a client does (scoped STS grant, S3 PUT, finish).
 """
 
+import datetime
 import json
 import time
 import urllib.error
@@ -31,11 +32,14 @@ from typing import Any, Literal, Protocol, overload
 import psycopg
 import pytest
 from arkitekt_datalayer.datalayer import Datalayer
+from authentikate import settings as authentikate_settings
 from authentikate.models import Client, Membership, Organization, User
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from dokker import testing
 from graphql import GraphQLError
+from joserfc import jwt
+from joserfc.jwk import OKPKey
 from kante.context import HttpContext, UniversalRequest, WsContext
 from pytest_django import DjangoDbBlocker
 from pytest_django.fixtures import SettingsWrapper
@@ -1184,3 +1188,96 @@ def fakemarket(backend_stack: Stack, settings: SettingsWrapper) -> Iterator[Fake
     market.reset()
     yield market
     market.reset()
+
+
+# --- Guests of the organization, and workflows ------------------------------------------------
+
+#: What rekuest signs task tokens with in the test settings (``AUTHENTIKATE["provenance"]``).
+PROVENANCE_KEY = OKPKey.import_key(
+    json.loads((Path(__file__).parent / "fixtures" / "provenance_key.json").read_text())
+)
+
+
+def task_token(
+    rcb: str,
+    org: str | None,
+    act_sub: str = "1",
+    *,
+    tsk: str = "2",
+    rtk: str = "1",
+) -> str:
+    """A task token as rekuest signs it for the static test app: task ``tsk`` of the workflow
+    ``rtk`` (its root task), assigned by ``rcb``, in the organization ``org``."""
+    now = int(datetime.datetime.now(datetime.UTC).timestamp())
+    claims: dict[str, object] = {
+        "iss": "rekuest",
+        "aud": ["bank"],
+        "sub": act_sub,
+        "act": {"sub": act_sub, "cid": "static", "iss": "static_issuer"},
+        "iat": now,
+        "exp": now + 300,
+        "jti": uuid.uuid4().hex,
+        "tsk": tsk,
+        "ptk": rtk,
+        "rtk": rtk,
+        "rcb": rcb,
+        "ahs": "e3b0c44298fc1c14",
+        "aha": "sha256-canonical-v1",
+    }
+    if org is not None:
+        claims["org"] = org
+    return jwt.encode(
+        {"alg": "Ed25519", "kid": "bank-test-provenance"},
+        claims,
+        PROVENANCE_KEY,
+        algorithms=["Ed25519"],
+    )
+
+
+def request_context(bearer: str = "test", task: str | None = None) -> HttpContext:
+    """A request presenting the static token ``bearer`` (and a task token), as a client sends it:
+    nothing resolved yet."""
+    headers = {"Authorization": f"Bearer {bearer}"}
+    if task is not None:
+        headers["rekuest-task"] = task
+    return HttpContext(
+        request=UniversalRequest(_extensions={}),
+        response=TemporalResponse(),
+        headers=headers,
+        type="http",
+    )
+
+
+#: ``guest({key: roles})``: a context presenting a guest's token granted those collaborations, by
+#: their key (lok's), with the roles held in each (``[]``: view only).
+GuestFactory = Callable[[Mapping[str, list[str]]], HttpContext]
+
+
+@pytest.fixture
+def guest(
+    transactional_db: None,
+    authenticated_context: HttpContext,
+    settings: SettingsWrapper,
+) -> Iterator[GuestFactory]:
+    """``guest({key: roles})``: a context presenting a guest of ``static_org`` (sub 20), granted
+    those collaborations by their key, as lok lists them in the token's ``collabs``. Holds no role
+    of the organization, through an app granted all of bank."""
+
+    def mint(collaborations: Mapping[str, list[str]]) -> HttpContext:
+        settings.AUTHENTIKATE = {
+            **settings.AUTHENTIKATE,
+            "static_tokens": {
+                **settings.AUTHENTIKATE["static_tokens"],
+                "guest": {
+                    "sub": "20",
+                    "roles": [],
+                    "collabs": dict(collaborations),
+                    "scope": "openid bank_all",
+                },
+            },
+        }
+        authentikate_settings.cached_settings = None
+        return request_context("guest")
+
+    yield mint
+    authentikate_settings.cached_settings = None

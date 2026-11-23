@@ -7,6 +7,11 @@ asks for one of bank's scopes (``bank_read``, ``bank_write``, ``bank_link``, ``b
 asks for ``bank_editor``: a member holding it may link, sync, categorize and budget; only
 ``bank_admin`` sets up the providers banks are linked through (``provider_mutation``).
 
+A guest of the organization (``arkitekt_service.collaborations``) reads the accounts put in their
+collaborations, with their transactions, and nothing else: every read is held to them
+(``finance.scoping.scope_queryset``), and the ``CollaborationGate`` drops whatever a resolver hands
+out that is in none of them. Guests only read: no mutation and no subscription is open to them.
+
 * ``AuthentikateExtension`` — authenticates the request from its bearer token
   and exposes the user/organization/client on ``info.context.request``.
 * ``KoherentExtension`` — attributes every model write in a request to that
@@ -21,9 +26,16 @@ import strawberry_django
 from arkitekt_datalayer import mutations as datalayer_mutations
 from arkitekt_datalayer import scalars as datalayer_scalars
 from arkitekt_datalayer.datalayer import load_config
-from arkitekt_service.graphql import TelemetryExtension, annotate_schema
+from arkitekt_service.collaborations import graphql as collaboration_types
+from arkitekt_service.graphql import (
+    CollaborationGate,
+    TelemetryExtension,
+    annotate_schema,
+)
 from authentikate.strawberry.directives import AuthExtension, AuthSubscribeExtension
 from authentikate.strawberry.extension import AuthentikateExtension
+from django.db.models import Model
+from kante.types import Info
 from koherent.strawberry.extension import KoherentExtension
 from strawberry.schema.config import StrawberryConfig
 from strawberry_django.optimizer import DjangoOptimizerExtension
@@ -31,11 +43,33 @@ from strawberry_django.optimizer import DjangoOptimizerExtension
 from bank_server.contract import ADMIN, EDITOR
 from bank_server.logs import QuietErrorsSchema
 from bank_server.service import service as bank_service
-from finance import types
+from finance import models, types
 from finance.graphql import mutations, queries, subscriptions
+from finance.scoping import get_for_org
 from finance.types import imports as import_types
 from finance.types import insights as insight_types
 from finance.types import prices as price_types
+
+#: What a member may put in a collaboration, read through their organization. A transaction and a
+#: recurring payment go in with their account (they are part of it). Providers, connections and
+#: statement imports hold or carry the organization's bank credentials and data, merchants and
+#: budgets are the organization's own bookkeeping: none of them is ever shown to a guest.
+SHAREABLE: frozenset[type[Model]] = frozenset(
+    {models.BankAccount, models.Transaction, models.RecurringPayment, models.Category}
+)
+
+
+def _shareable(model: type[Model], id: strawberry.ID, info: Info) -> Model:
+    """The object a collaboration mutation names, in the request's organization; refused unless it is shareable."""
+    if model not in SHAREABLE:
+        raise PermissionError(
+            f"A {model.__name__} is never put in a collaboration: only accounts (with their transactions) and categories are"
+        )
+    return get_for_org(model, info, id=id)
+
+
+#: The collaborations bank's accounts are shared in, which a guest of the organization is granted.
+collaboration_api = collaboration_types.resolvers(fetch=_shareable)
 
 
 def field(scope: str = "bank_read", **kwargs: Any) -> Any:  # noqa: ANN401 - as strawberry_django's: the value of `x: T = field()`
@@ -91,6 +125,20 @@ def subscription(**kwargs: Any) -> Any:  # noqa: ANN401 - as strawberry_django's
 @strawberry.type
 class Query:
     """The root query type."""
+
+    # Collaborations
+    collaborations: list[collaboration_types.Collaboration] = field(
+        resolver=collaboration_api.collaborations,
+        description="The organization's collaborations bank holds accounts in (a guest: the ones granted to them).",
+    )
+    collaboration: collaboration_types.Collaboration = field(
+        resolver=collaboration_api.collaboration,
+        description="What bank holds in a collaboration, by its key (lok's).",
+    )
+    collaborations_stats: collaboration_types.CollaborationStats = field(
+        resolver=collaboration_api.collaborations_stats,
+        description="Count the collaborations `collaborations` lists, and the objects in them.",
+    )
 
     bank_providers: list[types.BankProvider] = field(
         description="The providers the organization set up; banks are linked through one."
@@ -288,6 +336,33 @@ class Query:
 @strawberry.type
 class Mutation:
     """The root mutation type."""
+
+    # Collaborations (view only for the guests they are granted to)
+    add_to_collaboration = mutation(
+        scope="bank_share",
+        resolver=collaboration_api.add_to_collaboration,
+        description="Put an account in a collaboration (lok's, by its key) for its guests to read, with its transactions, balances, holdings and recurring payments (live), and the categories they are in (as they are now). Never a provider, a connection, an import, a merchant or a budget. The first thing put in makes bank's row of the collaboration.",
+    )
+    add_many_to_collaboration = mutation(
+        scope="bank_share",
+        resolver=collaboration_api.add_many_to_collaboration,
+        description="Put several accounts or categories in a collaboration at once, each with what it needs to be read; all or none.",
+    )
+    share_workflow = mutation(
+        scope="bank_share",
+        resolver=collaboration_api.share_workflow,
+        description="Put what a workflow (its root task) created in bank in a collaboration, as it is now: the categories it made, and the recurring payments of accounts already shared. Accounts and transactions come from a bank or an import and record no workflow: they are reported unknown. `dryRun` only says what would be put in.",
+    )
+    remove_from_collaboration = mutation(
+        scope="bank_share",
+        resolver=collaboration_api.remove_from_collaboration,
+        description="Take an account or a category out of a collaboration, with what it brought that nothing else there needs.",
+    )
+    delete_collaboration = mutation(
+        scope="bank_share",
+        resolver=collaboration_api.delete_collaboration,
+        description="Take everything bank holds in a collaboration (by its key) out of it: its guests read none of it here any more. lok's collaboration and its grants stay.",
+    )
 
     create_enable_banking_provider = provider_mutation(
         resolver=mutations.create_enable_banking_provider,
@@ -554,13 +629,16 @@ schema = Schema(
     mutation=Mutation,
     subscription=Subscription,
     config=StrawberryConfig(scalar_map={**datalayer_scalars.SCALAR_MAP}),
+    # A guest of the organization is handed only what is in their collaborations (CollaborationGate).
     extensions=[
         TelemetryExtension,
         DjangoOptimizerExtension,
         AuthentikateExtension,
+        CollaborationGate,
         KoherentExtension,
     ],
 )
 
-# Which structure each type is (`@identified`), and the contract's catch-alls (`bank_all`, `bank_admin`).
+# Which structure each type is (`@identified`), the contract's catch-alls (`bank_all`, `bank_admin`),
+# and, behind the gate, that bank lets guests in.
 annotate_schema(schema, bank_service)

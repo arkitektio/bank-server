@@ -2168,16 +2168,6 @@
                 }
             }
         ],
-        "./finance/types/__init__.py": [
-            {
-                "code": "reportAttributeAccessIssue",
-                "range": {
-                    "startColumn": 25,
-                    "endColumn": 32,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./finance/types/_shared.py": [
             {
                 "code": "reportReturnType",

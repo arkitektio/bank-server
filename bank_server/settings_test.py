@@ -39,6 +39,27 @@ AUTHENTIKATE = {
             "readertest": {"sub": "1", "scope": "openid bank_read"},
         }.items()
     },
+    # A rekuest that signs task tokens with tests/fixtures/provenance_key.json: what a workflow
+    # created (tests/test_share_workflow.py).
+    "provenance": {
+        "issuers": [
+            {
+                "iss": "rekuest",
+                "kind": "jwks_dict",
+                "jwks": {
+                    "keys": [
+                        {
+                            "crv": "Ed25519",
+                            "x": "F0lnYnDhFQYJgr7REPaUUyghPfdGB_FU8b2C2TgTuyg",
+                            "kty": "OKP",
+                            "kid": "bank-test-provenance",
+                        }
+                    ]
+                },
+            }
+        ],
+        "audience": "*",
+    },
 }
 
 # The fake bank and the fake Scalable of the test stack, and a Fernet key generated for the run:

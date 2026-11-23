@@ -10,6 +10,7 @@ from enum import Enum
 
 import strawberry
 import strawberry_django
+from arkitekt_service.collaborations.filters import SharingFilterMixin
 from django.db.models import F, Max, Q, QuerySet
 from django.utils import timezone
 from kante.types import Info
@@ -82,7 +83,7 @@ def requires(model: type, value: list[DescriptorConstraintInput], prefix: str) -
 
 
 @strawberry_django.filter_type(models.BankConnection)
-class BankConnectionFilter:
+class BankConnectionFilter(SharingFilterMixin):
     """Filtering options for bank connections."""
 
     @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
@@ -117,7 +118,7 @@ class BankConnectionFilter:
 
 
 @strawberry_django.filter_type(models.BankProvider)
-class BankProviderFilter:
+class BankProviderFilter(SharingFilterMixin):
     """Filtering options for providers."""
 
     @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
@@ -141,7 +142,7 @@ class BankProviderFilter:
 
 
 @strawberry_django.filter_type(models.BankAccount)
-class BankAccountFilter:
+class BankAccountFilter(SharingFilterMixin):
     """Filtering options for bank accounts."""
 
     @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
@@ -202,7 +203,7 @@ class NearInput:
 
 
 @strawberry_django.filter_type(models.Transaction)
-class TransactionFilter:
+class TransactionFilter(SharingFilterMixin):
     """Filtering options for transactions."""
 
     @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
@@ -383,7 +384,7 @@ class TransactionFilter:
 
 
 @strawberry_django.filter_type(models.Category)
-class CategoryFilter:
+class CategoryFilter(SharingFilterMixin):
     """Filtering options for categories."""
 
     @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
@@ -443,7 +444,7 @@ class CategoryRuleFilter:
 
 
 @strawberry_django.filter_type(models.Budget)
-class BudgetFilter:
+class BudgetFilter(SharingFilterMixin):
     """Filtering options for budgets."""
 
     @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
@@ -466,7 +467,7 @@ class BudgetFilter:
 
 
 @strawberry_django.filter_type(models.RecurringPayment)
-class RecurringPaymentFilter:
+class RecurringPaymentFilter(SharingFilterMixin):
     """Filtering options for recurring payments."""
 
     @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
@@ -536,7 +537,7 @@ class BudgetOrder:
 
 
 @strawberry_django.filter_type(models.Merchant)
-class MerchantFilter:
+class MerchantFilter(SharingFilterMixin):
     """Filtering options for merchants."""
 
     @strawberry_django.filter_field(description=REQUIRES_DESCRIPTION)
@@ -588,7 +589,7 @@ class MerchantFilter:
 
 
 @strawberry_django.filter_type(models.StatementImport)
-class StatementImportFilter:
+class StatementImportFilter(SharingFilterMixin):
     """Filtering options for statement imports."""
 
     @strawberry_django.filter_field

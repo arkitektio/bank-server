@@ -6,6 +6,10 @@ single-item queries, subscriptions) must go through :func:`for_org`,
 :func:`get_for_org` or :func:`aget_for_org` instead of ``Model.objects`` so
 one organization cannot read or mutate another organization's rows.
 
+A guest of the organization (``arkitekt_service.collaborations``) reads what a member put in a
+collaboration of theirs, and nothing else: :func:`scope_queryset` holds them to it at every depth,
+so a value a nested field computes from rows is computed from the shared ones.
+
 Guardian object-level permissions are not used here; if object-level
 read enforcement is ever wanted, :func:`for_org` is the
 designated seam — every scoped read funnels through it.
@@ -13,6 +17,7 @@ designated seam — every scoped read funnels through it.
 
 from functools import cache
 
+from arkitekt_service.collaborations.guests import guest_of, object_scope
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models as django_models
 from kante.types import Info
@@ -66,17 +71,23 @@ def organization_path(model: type[django_models.Model]) -> str | None:
 def scope_queryset(
     queryset: django_models.QuerySet, info: Info
 ) -> django_models.QuerySet:
-    """Narrow an existing ``queryset`` to the request's organization."""
+    """Narrow an existing ``queryset`` to the request's organization (a guest: their collaborations)."""
     model = queryset.model
     path = organization_path(model)
+    guest = guest_of(info) is not None
     if path is None:
         if model.__name__ not in UNSCOPED_MODELS:
             raise LookupError(
                 f"{model.__name__} has no path to an organization and is not "
                 "registered in finance.scoping.UNSCOPED_MODELS"
             )
-        return queryset
-    return queryset.filter(**{path: info.context.request.organization})
+        return queryset.none() if guest else queryset
+    scoped = queryset.filter(**{path: info.context.request.organization})
+    if guest:
+        # Not only at a root field (no resolve info): wherever it is read.
+        held: django_models.QuerySet = object_scope(scoped)
+        return held
+    return scoped
 
 
 def for_org(model: type[django_models.Model], info: Info) -> django_models.QuerySet:

@@ -47,6 +47,10 @@ SCOPES = [
         description="Set up the banking providers (Enable Banking, Scalable) that accounts can be linked through.",
     ),
     Scope(
+        key="bank_share",
+        description="Share bank accounts and their transactions with people outside your organization through collaborations, for them to read.",
+    ),
+    Scope(
         key="bank_all",
         description="Do everything in Bank on your behalf.",
         is_all_scope=True,
@@ -62,7 +66,7 @@ ROLES = [
     ),
     Role(
         key="bank_editor",
-        description="Link accounts and organise your transactions, budgets and categories.",
+        description="Link accounts, organise your transactions, budgets and categories, and share accounts through collaborations.",
         is_default_role=True,
     ),
 ]
