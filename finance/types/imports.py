@@ -159,7 +159,7 @@ class StatementImport(OrgScoped):
             list[StatementImport],
             list(
                 models.StatementImport.objects.filter(
-                    same, organization_id=own.organization_id
+                    same, file__organization_id=store.organization_id
                 )
                 .exclude(pk=own.pk)
                 .order_by("created_at", "pk")
