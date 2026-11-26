@@ -2,12 +2,12 @@
 
 import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 import kante
 import strawberry
 import strawberry_django
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from kante.types import Info
 from strawberry.scalars import JSON
 
@@ -142,6 +142,26 @@ class StatementImport(OrgScoped):
             super()
             .get_queryset(queryset, info, **kwargs)
             .order_by("-created_at", "-id")
+        )
+
+    @strawberry_django.field(
+        description="Earlier or later imports of the very same file: the same stored file, or one with its `digest` and size. Empty while the digest is owed. Read only -- an import of a file already applied is harmless (applying is idempotent), but usually a mistake worth saying"
+    )
+    def duplicates(self) -> list["StatementImport"]:
+        own = cast(models.StatementImport, self)
+        store = own.file
+        if store is None:
+            return []
+        same = Q(file_id=store.pk)
+        if store.digest is not None:
+            same |= Q(file__digest=store.digest, file__size_bytes=store.size_bytes)
+        return cast(
+            list[StatementImport],
+            list(
+                models.StatementImport.objects.filter(same, organization_id=own.organization_id)
+                .exclude(pk=own.pk)
+                .order_by("created_at", "pk")
+            ),
         )
 
     @strawberry_django.field(

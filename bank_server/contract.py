@@ -416,6 +416,21 @@ contract = Contract(
         "ensureadmin": Job(
             ("ensureadmin",), "Create the operator account the config names"
         ),
+        "purge_orphaned_stores": Job(
+            ("purge_orphaned_stores",),
+            "Delete the stored objects of deleted data after the grace period, and of uploads never finished",
+            schedule="daily 03:00",
+        ),
+        # Long-running, so never in `setup=`: it reads every byte it owes. The service serves
+        # meanwhile; a file without a digest is simply not known yet.
+        "digest_bigfiles": Job(
+            ("digest_bigfiles",),
+            "Hash the stored files whose digest is still owed, for duplicate detection",
+            schedule="daily 01:00-06:00",
+            long_running=True,
+            backlog=("--backlog",),
+            deadline="--until",
+        ),
         "restore_descriptors": Job(
             ("restore_descriptors",),
             "Store the descriptors of every object that misses one (--all: of every row)",
